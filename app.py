@@ -204,6 +204,8 @@ async def me(request: Request):
             SUM(CASE WHEN status='cashed_out' THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END) AS losses,
             COALESCE(SUM(payout),0) AS payout,
+            COALESCE(SUM(payout-bet),0) AS net_profit,
+            COALESCE(ROUND(100.0*SUM(CASE WHEN status='cashed_out' THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0)),0) AS win_rate,
             COALESCE(MAX(CASE WHEN status='cashed_out' AND bet>0 THEN 1.0*payout/bet ELSE 0 END),0) AS best_multiplier
             FROM mines_games WHERE uid=? AND status IN ('lost','cashed_out')""", (uid,)).fetchone()
     return {"user":{"id":uid,"name":user.get("first_name","Игрок"),
