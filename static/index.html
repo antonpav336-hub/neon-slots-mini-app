@@ -104,8 +104,22 @@ body{background:radial-gradient(ellipse at 10% 0%,#26356a55,transparent 38%),rad
 .cashier-note{font-size:9px;color:#8490b2;margin-top:14px}
 @media(max-width:360px){.nav-tab{font-size:8px}.nav-tab .nav-icon{font-size:17px}.bottom-nav{gap:1px;padding:7px 5px}}
 
+
+/* NEON MINES welcome animation */
+#intro{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;overflow:hidden;background:radial-gradient(ellipse at 50% 42%,#28134c 0%,#100b25 42%,#070914 100%);transition:opacity .65s ease,visibility .65s ease}
+#intro.hide{opacity:0;visibility:hidden;pointer-events:none}
+#intro:before,#intro:after{content:"";position:absolute;width:310px;height:310px;border:1px solid #9d42ff55;border-radius:50%;box-shadow:0 0 55px #8c2cff22,inset 0 0 55px #8c2cff22;animation:introOrbit 8s linear infinite}
+#intro:after{width:245px;height:245px;border-color:#35dfff55;animation-direction:reverse;animation-duration:6s}
+.intro-content{position:relative;z-index:1;text-align:center;padding:28px 20px;animation:introRise .9s cubic-bezier(.2,.8,.2,1) both}
+.intro-mascot{font-size:94px;line-height:1.2;filter:drop-shadow(0 0 20px #b52cff);animation:mascotFloat 1.8s ease-in-out infinite}
+.intro-title{margin:12px 0 5px;font-size:34px;font-weight:900;letter-spacing:2px;background:linear-gradient(100deg,#f6c8ff,#a94cff 48%,#56eaff);background-clip:text;-webkit-background-clip:text;color:transparent;text-shadow:0 0 28px #a02cff55}
+.intro-sub{font-size:12px;color:#c5b8e9;letter-spacing:2px;text-transform:uppercase}
+.intro-loader{width:190px;height:5px;margin:25px auto 0;border-radius:20px;background:#ffffff18;overflow:hidden}
+.intro-loader i{display:block;height:100%;width:40%;border-radius:20px;background:linear-gradient(90deg,#a42cff,#50eaff);box-shadow:0 0 14px #b52cff;animation:loaderMove 1.35s ease-in-out infinite}
+@keyframes introOrbit{to{transform:rotate(360deg)}}@keyframes mascotFloat{50%{transform:translateY(-10px) rotate(-4deg)}}@keyframes introRise{from{opacity:0;transform:translateY(22px) scale(.94)}to{opacity:1;transform:none}}@keyframes loaderMove{0%{transform:translateX(-110%)}100%{transform:translateX(500%)}}
+@media(prefers-reduced-motion:reduce){#intro *{animation:none!important}}
 </style></head>
-<body><main class="wrap"><header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
+<body><div id="intro" aria-label="Загрузка NEON MINES"><div class="intro-content"><div class="intro-mascot">💣</div><div class="intro-title">NEON MINES</div><div class="intro-sub">Добро пожаловать в игру</div><div class="intro-loader"><i></i></div></div></div><main class="wrap"><header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
 <section class="page active" id="page-home"><div class="hero"><div class="eyebrow">RISK • REVEAL • CASH OUT</div><h1>NEON MINES</h1><p>Открывай безопасные клетки и забирай растущий множитель</p></div><section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">монет</span></div></div><div class="coin">🪙</div></section><div class="home-shortcuts"><button class="shortcut primary" data-go="games"><span>💣</span><b>Играть в Минёр</b><small>Открывай клетки и забирай выигрыш</small></button><div class="shortcut-row"><button class="shortcut" data-go="deposit"><span>⭐</span><b>Пополнить</b><small>Telegram Stars</small></button><button class="shortcut" data-go="withdraw"><span>💸</span><b>Вывести</b><small>Заявка на вывод</small></button></div></div><div class="home-caption">ТВОЯ ИГРОВАЯ ЗОНА <span>NEON MINES</span></div></section><section class="page" id="page-games"><section class="mines-card">
 <div class="slot-head"><strong>💣 MINES</strong><div style="display:flex;align-items:center;gap:10px"><button class="sound-toggle" id="soundToggle">🔊 ЗВУК: ВКЛ</button><span class="live">LIVE GAME</span></div></div>
 <div class="bet-row"><span class="bet-label">СТАВКА</span><span class="bet-value" id="betVal">10 монет</span></div>
@@ -160,4 +174,5 @@ function openModal(mode){state.mode=mode;$('modalTitle').textContent=mode==='dep
 $('deposit').onclick=()=>openModal('deposit');$('withdraw').onclick=()=>openModal('withdraw');$('cancel').onclick=()=>$('modal').classList.remove('show');
 $('confirm').onclick=async()=>{const amount=Number($('amount').value);if(!Number.isInteger(amount)||amount<1){toast('Введи корректную сумму');return}try{const d=await api(state.mode==='deposit'?'/api/deposit':'/api/withdraw',{amount});$('modal').classList.remove('show');toast(d.message||'Готово');if(state.mode==='withdraw'){setBalance(d.balance);refresh()}else if(tg){tg.showAlert('Счёт отправлен в чат с ботом. Оплати его там, затем вернись в приложение.')}}catch(e){toast(e.message)}};
 refresh();
+window.addEventListener('load',()=>{setTimeout(()=>document.getElementById('intro')?.classList.add('hide'),1900)});
 </script></body></html>
