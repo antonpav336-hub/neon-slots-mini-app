@@ -187,7 +187,7 @@ async def telegram_webhook(request: Request):
 
 @app.get("/")
 async def home():
-    return FileResponse(ROOT / "static" / "index.html")
+    return FileResponse(ROOT / "static" / "index.html", headers={"Cache-Control":"no-store, no-cache, must-revalidate, max-age=0","Pragma":"no-cache","Expires":"0"})
 
 @app.get("/api/me")
 async def me(request: Request):
