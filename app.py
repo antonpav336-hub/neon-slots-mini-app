@@ -33,24 +33,35 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip() or secrets.token_urlsaf
 @asynccontextmanager
 async def lifespan(fastapi_app):
     global telegram_application
-    if BOT_TOKEN:
-        telegram_application = build_application()
-        await telegram_application.initialize()
-        await telegram_application.start()
-        public_url = os.getenv("WEBHOOK_URL", "").strip() or os.getenv("RENDER_EXTERNAL_URL", "").strip()
-        if public_url:
-            webhook_url = public_url.rstrip("/") + WEBHOOK_PATH
-            await telegram_application.bot.set_webhook(
-                url=webhook_url,
-                secret_token=WEBHOOK_SECRET,
-                allowed_updates=Update.ALL_TYPES,
-                drop_pending_updates=False,
-            )
-            print("Telegram webhook configured:", webhook_url)
-        else:
-            print("WARNING: WEBHOOK_URL/RENDER_EXTERNAL_URL is missing; webhook not configured.")
+    if BOT_TOKEN and PAYMENT_SECRET and ADMIN_ID:
+        candidate = build_application()
+        try:
+            await candidate.initialize()
+            await candidate.start()
+            public_url = os.getenv("WEBHOOK_URL", "").strip() or os.getenv("RENDER_EXTERNAL_URL", "").strip()
+            if public_url:
+                webhook_url = public_url.rstrip("/") + WEBHOOK_PATH
+                await candidate.bot.set_webhook(
+                    url=webhook_url,
+                    secret_token=WEBHOOK_SECRET,
+                    allowed_updates=Update.ALL_TYPES,
+                    drop_pending_updates=False,
+                )
+                print("Telegram webhook configured:", webhook_url)
+            else:
+                print("WARNING: WEBHOOK_URL/RENDER_EXTERNAL_URL is missing; webhook not configured.")
+            telegram_application = candidate
+        except Exception as exc:
+            print("TELEGRAM BOT STARTUP ERROR:", repr(exc))
+            try:
+                if candidate.running:
+                    await candidate.stop()
+                await candidate.shutdown()
+            except Exception:
+                pass
+            telegram_application = None
     else:
-        print("WARNING: BOT_TOKEN is missing; Telegram bot is disabled.")
+        print("WARNING: BOT_TOKEN, PAYMENT_SECRET or ADMIN_ID is missing; Telegram bot is disabled.")
     try:
         yield
     finally:
