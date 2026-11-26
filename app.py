@@ -256,7 +256,7 @@ async def deposit(body: Amount, request: Request):
     async with httpx.AsyncClient(timeout=12) as client:
         response = await client.post(telegram_api_url("sendInvoice"), json={
             "chat_id": uid, "title": "Звёзды NEON MINES",
-            "description": f"{coins} игровых ⭐",
+            "description": f"{coins} игровых звёзд",
             "payload": payload, "currency": "XTR",
             "prices": [{"label": f"{coins} ⭐", "amount": stars}]
         })
@@ -572,8 +572,8 @@ async def withdraw(body: Amount, request: Request):
         new_balance = balance - amount
     await notify_admin(
         f"📤 НОВАЯ ЗАЯВКА НА ВЫВОД #{wid}\n"
-        f"Игрок: {display_user(user)}\nID: {uid}\nСумма: {amount} монет\n"
+        f"Игрок: {display_user(user)}\nID: {uid}\nСумма: {amount} ⭐\n"
         f"Статус: ожидает решения\n\nКоманды: /approve {wid} или /reject {wid}"
     )
     return {"ok":True,"id":wid,"balance":new_balance,
-            "message":f"Заявка #{wid} отправлена администратору. ⭐ы временно зарезервированы."}
+            "message":f"Заявка #{wid} отправлена администратору. звёзды временно зарезервированы."}
