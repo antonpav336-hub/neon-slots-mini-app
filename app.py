@@ -109,6 +109,12 @@ def init_db():
             uid INTEGER PRIMARY KEY, points INTEGER NOT NULL DEFAULT 0,
             last_claim INTEGER NOT NULL DEFAULT 0, total_claims INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS mines_games(
+            id TEXT PRIMARY KEY, uid INTEGER NOT NULL, bet INTEGER NOT NULL,
+            mine_count INTEGER NOT NULL, mine_cells TEXT NOT NULL,
+            revealed TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'active',
+            payout INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+        );
         """)
 init_db()
 
@@ -351,6 +357,91 @@ async def internal_resolve_withdrawal(withdrawal_id: int, body: InternalWithdraw
         balance = int(balance_row["bal"]) if balance_row else 0
     return {"ok": True, "status": status, "user_id": row["uid"], "amount": row["amount"], "balance": balance}
 
+
+@app.post("/api/mines/start")
+async def mines_start(body: dict, request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    bet = body.get("amount")
+    mine_count = body.get("mines")
+    if not isinstance(bet, int) or isinstance(bet, bool) or bet < 1 or bet > MAX_BET:
+        raise HTTPException(400, "Некорректная ставка.")
+    if not isinstance(mine_count, int) or isinstance(mine_count, bool) or not 1 <= mine_count <= 24:
+        raise HTTPException(400, "Выбери от 1 до 24 мин.")
+    mine_cells = sorted(secrets.SystemRandom().sample(range(25), mine_count))
+    game_id = secrets.token_urlsafe(12)
+    now = int(time.time())
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
+        balance = int(row["bal"]) if row else 0
+        if bet > balance:
+            raise HTTPException(400, f"Недостаточно монет. Баланс: {balance}")
+        con.execute("UPDATE users SET bal=bal-? WHERE id=?", (bet, uid))
+        con.execute("""INSERT INTO mines_games(id,uid,bet,mine_count,mine_cells,revealed,status,created_at)
+                       VALUES(?,?,?,?,?,"[]","active",?)""", (game_id, uid, bet, mine_count, json.dumps(mine_cells), now))
+        new_balance = balance - bet
+    return {"ok": True, "game_id": game_id, "bet": bet, "mines": mine_count, "revealed": [], "multiplier": 1.0, "cashout": 0, "balance": new_balance}
+
+def mines_multiplier(mine_count: int, safe_picks: int) -> float:
+    probability = 1.0
+    for i in range(safe_picks):
+        probability *= (25 - mine_count - i) / (25 - i)
+    return round(0.97 / probability, 4)
+
+@app.post("/api/mines/pick")
+async def mines_pick(body: dict, request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    game_id = body.get("game_id")
+    cell = body.get("cell")
+    if not isinstance(game_id, str) or not isinstance(cell, int) or isinstance(cell, bool) or not 0 <= cell < 25:
+        raise HTTPException(400, "Некорректный ход.")
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        game = con.execute("SELECT * FROM mines_games WHERE id=? AND uid=?", (game_id, uid)).fetchone()
+        if not game or game["status"] != "active":
+            raise HTTPException(404, "Активная игра не найдена.")
+        revealed = json.loads(game["revealed"])
+        if cell in revealed:
+            raise HTTPException(400, "Эта клетка уже открыта.")
+        mines = json.loads(game["mine_cells"])
+        if cell in mines:
+            con.execute("UPDATE mines_games SET status='lost' WHERE id=?", (game_id,))
+            con.execute("INSERT INTO games(uid,bet,payout,symbols,created_at) VALUES(?,?,0,?,?)", (uid, game["bet"], "💣 Мина", int(time.time())))
+            row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
+            return {"status":"lost", "cell":cell, "mines":mines, "revealed":revealed+[cell], "multiplier":0, "cashout":0, "balance":int(row["bal"]) if row else 0}
+        revealed.append(cell)
+        mult = mines_multiplier(int(game["mine_count"]), len(revealed))
+        cashout = int(int(game["bet"]) * mult)
+        con.execute("UPDATE mines_games SET revealed=? WHERE id=?", (json.dumps(revealed), game_id))
+        row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
+        balance = int(row["bal"]) if row else 0
+    return {"status":"safe", "cell":cell, "revealed":revealed, "multiplier":mult, "cashout":cashout, "balance":balance}
+
+@app.post("/api/mines/cashout")
+async def mines_cashout(body: dict, request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    game_id = body.get("game_id")
+    if not isinstance(game_id, str):
+        raise HTTPException(400, "Игра не найдена.")
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        game = con.execute("SELECT * FROM mines_games WHERE id=? AND uid=?", (game_id, uid)).fetchone()
+        if not game or game["status"] != "active":
+            raise HTTPException(404, "Активная игра не найдена.")
+        revealed = json.loads(game["revealed"])
+        if not revealed:
+            raise HTTPException(400, "Сначала открой хотя бы одну клетку.")
+        mult = mines_multiplier(int(game["mine_count"]), len(revealed))
+        payout = int(int(game["bet"]) * mult)
+        con.execute("UPDATE users SET bal=bal+? WHERE id=?", (payout, uid))
+        con.execute("UPDATE mines_games SET status='cashed_out',payout=? WHERE id=?", (payout, game_id))
+        con.execute("INSERT INTO games(uid,bet,payout,symbols,created_at) VALUES(?,?,?,?,?)", (uid, game["bet"], payout, f"💎 {len(revealed)} клеток • x{mult:.2f}", int(time.time())))
+        row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
+        balance = int(row["bal"]) if row else 0
+    return {"status":"cashed_out", "payout":payout, "multiplier":mult, "balance":balance}
 
 @app.post("/api/spin")
 async def spin(body: Amount, request: Request):
