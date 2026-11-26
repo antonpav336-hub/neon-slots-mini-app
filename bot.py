@@ -180,7 +180,7 @@ async def approve(update, context):
 async def reject(update, context):
     await resolve(update, context, False)
 
-def main():
+def build_application():
     if not TOKEN or not PAYMENT_SECRET or not ADMIN_ID:
         raise RuntimeError("Нужно задать BOT_TOKEN, ADMIN_ID и PAYMENT_SECRET.")
     builder = ApplicationBuilder().token(TOKEN)
@@ -197,8 +197,5 @@ def main():
         application.add_handler(CommandHandler(command, handler))
     application.add_handler(PreCheckoutQueryHandler(precheckout))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, paid))
-    print("NEON SLOTS BOT STARTED")
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
+    print("NEON SLOTS BOT WEBHOOK MODE")
+    return application
