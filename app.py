@@ -22,7 +22,7 @@ def telegram_api_url(method: str) -> str:
     suffix = "/test" if TELEGRAM_TEST_SERVER else ""
     return f"https://api.telegram.org/bot{BOT_TOKEN}{suffix}/{method}"
 COINS_PER_STAR = int(os.getenv("COINS_PER_STAR", "1"))
-MIN_WITHDRAW = int(os.getenv("MIN_WITHDRAW", "50"))
+MIN_WITHDRAW = 2500\nMIN_DEPOSIT = 100
 MAX_BET = int(os.getenv("MAX_BET", "100000"))
 INIT_DATA_MAX_AGE = int(os.getenv("INIT_DATA_MAX_AGE", "86400"))
 
@@ -254,10 +254,10 @@ async def deposit(body: Amount, request: Request):
                     (payload, uid, stars, coins, int(time.time())))
     async with httpx.AsyncClient(timeout=12) as client:
         response = await client.post(telegram_api_url("sendInvoice"), json={
-            "chat_id": uid, "title": "Монеты Neon Slots",
-            "description": f"{coins} игровых монет",
+            "chat_id": uid, "title": "Звёзды NEON MINES",
+            "description": f"{coins} игровых ⭐",
             "payload": payload, "currency": "XTR",
-            "prices": [{"label": f"{coins} монет", "amount": stars}]
+            "prices": [{"label": f"{coins} ⭐", "amount": stars}]
         })
     data = response.json()
     if not data.get("ok"):
@@ -407,7 +407,7 @@ async def mines_start(body: dict, request: Request):
         row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
         balance = int(row["bal"]) if row else 0
         if bet > balance:
-            raise HTTPException(400, f"Недостаточно монет. Баланс: {balance}")
+            raise HTTPException(400, f"Недостаточно ⭐. Баланс: {balance}")
         con.execute("UPDATE users SET bal=bal-? WHERE id=?", (bet, uid))
         con.execute("""INSERT INTO mines_games(id,uid,bet,mine_count,mine_cells,revealed,status,created_at)
                        VALUES(?,?,?,?,?,"[]","active",?)""", (game_id, uid, bet, mine_count, json.dumps(mine_cells), now))
@@ -575,4 +575,4 @@ async def withdraw(body: Amount, request: Request):
         f"Статус: ожидает решения\n\nКоманды: /approve {wid} или /reject {wid}"
     )
     return {"ok":True,"id":wid,"balance":new_balance,
-            "message":f"Заявка #{wid} отправлена администратору. Монеты временно зарезервированы."}
+            "message":f"Заявка #{wid} отправлена администратору. ⭐ы временно зарезервированы."}
