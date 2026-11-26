@@ -1,420 +1,200 @@
 import os
-import sqlite3
-import time
-
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    WebAppInfo
-)
-
+import httpx
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    PreCheckoutQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
+    ApplicationBuilder, CommandHandler, PreCheckoutQueryHandler,
+    MessageHandler, ContextTypes, filters
 )
 
-# НАСТРОЙКИ
-TOKEN = os.getenv("BOT_TOKEN", "")
+TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-WEBAPP_URL = os.getenv("WEBAPP_URL", "")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://neon-slots-mini-app.onrender.com").strip()
+API_URL = os.getenv("API_URL", "https://neon-slots-mini-app.onrender.com").rstrip("/")
+PAYMENT_SECRET = os.getenv("PAYMENT_SECRET", "").strip()
+TEST_SERVER = os.getenv("TELEGRAM_TEST_SERVER", "1") == "1"
 
-DB_PATH = os.getenv("DB_PATH", "casino.db")
-MIN_WITHDRAW = int(os.getenv("MIN_WITHDRAW", "50"))
+def internal_headers():
+    return {"X-Internal-Secret": PAYMENT_SECRET}
 
+async def api_get(path):
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(API_URL + path, headers=internal_headers())
+        response.raise_for_status()
+        return response.json()
 
-# БАЗА ДАННЫХ
-def db():
-    con = sqlite3.connect(DB_PATH, timeout=15)
-    con.row_factory = sqlite3.Row
-    return con
+async def api_post(path, data):
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(API_URL + path, json=data, headers=internal_headers())
+        response.raise_for_status()
+        return response.json()
 
-
-def init_db():
-    with db() as con:
-        con.executescript("""
-        CREATE TABLE IF NOT EXISTS users(
-            id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            bal INTEGER NOT NULL DEFAULT 100,
-            created_at INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS withdrawals(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            uid INTEGER NOT NULL,
-            amount INTEGER NOT NULL,
-            status TEXT DEFAULT 'pending',
-            created_at INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS invoices(
-            payload TEXT PRIMARY KEY,
-            uid INTEGER NOT NULL,
-            stars INTEGER NOT NULL,
-            coins INTEGER NOT NULL,
-            status TEXT DEFAULT 'pending',
-            created_at INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS payments(
-            charge_id TEXT PRIMARY KEY,
-            uid INTEGER NOT NULL,
-            stars INTEGER NOT NULL,
-            coins INTEGER NOT NULL,
-            created_at INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS games(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            uid INTEGER NOT NULL,
-            bet INTEGER NOT NULL,
-            payout INTEGER NOT NULL,
-            symbols TEXT NOT NULL,
-            created_at INTEGER
-        );
-        """)
-
-
-def ensure_user(user):
-    with db() as con:
-        con.execute(
-            """INSERT OR IGNORE INTO users
-            (id,username,first_name,bal,created_at)
-            VALUES(?,?,?,100,?)""",
-            (
-                user.id,
-                user.username or "",
-                user.first_name or "Игрок",
-                int(time.time())
-            )
-        )
-
-        row = con.execute(
-            "SELECT bal FROM users WHERE id=?",
-            (user.id,)
-        ).fetchone()
-
-        return row["bal"]
-
-
-# /START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    balance = ensure_user(user)
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "🎰 ОТКРЫТЬ NEON SLOTS",
-                web_app=WebAppInfo(url=WEBAPP_URL)
-            )
-        ]
-    ])
-
+    try:
+        result = await api_post("/api/internal/user", {
+            "user_id": user.id, "username": user.username or "",
+            "first_name": user.first_name or "Игрок"
+        })
+        balance = result["balance"]
+    except Exception:
+        balance = "открой приложение для загрузки"
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🎰 ОТКРЫТЬ NEON SLOTS", web_app=WebAppInfo(url=WEBAPP_URL))
+    ]])
     await update.message.reply_text(
         f"🎰 Добро пожаловать в NEON SLOTS!\n\n"
-        f"👤 Игрок: {user.first_name}\n"
-        f"💰 Баланс: {balance} монет\n\n"
+        f"👤 Игрок: {user.first_name}\n💰 Баланс: {balance}\n\n"
         "Нажми кнопку ниже, чтобы открыть игру.",
         reply_markup=keyboard
     )
 
-
-# /BALANCE
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    amount = ensure_user(update.effective_user)
+    try:
+        result = await api_get(f"/api/internal/balance/{update.effective_user.id}")
+        await update.message.reply_text(f"💰 Твой баланс: {result['balance']} монет")
+    except Exception:
+        await update.message.reply_text("Не удалось получить баланс. Попробуй позже.")
 
-    await update.message.reply_text(
-        f"💰 Твой баланс: {amount} монет"
-    )
-
-
-# /MYID
 async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"🆔 Твой Telegram ID:\n"
-        f"{update.effective_user.id}"
-    )
+    await update.message.reply_text(f"🆔 Твой Telegram ID: {update.effective_user.id}")
 
-
-# /TERMS
 async def terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📜 NEON SLOTS — тестовый проект.\n"
-        "Игровые монеты не являются денежными средствами.\n"
-        "Выводы не осуществляются автоматически."
+        "Монеты являются виртуальными игровыми единицами, не деньгами.\n"
+        "Заявки на вывод — только тестовая функция; автоматические денежные выплаты не выполняются."
     )
 
-
-# /SUPPORT
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🛠 Поддержка NEON SLOTS\n"
-        "Свяжитесь с администратором проекта."
-    )
+    await update.message.reply_text("🛠 Поддержка NEON SLOTS: напиши администратору проекта.")
 
-
-# ПРОВЕРКА ОПЛАТЫ STARS
-async def precheckout(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.pre_checkout_query
+    try:
+        result = await api_post("/api/internal/precheckout", {
+            "payload": query.invoice_payload,
+            "user_id": query.from_user.id,
+            "total_amount": query.total_amount,
+            "currency": query.currency
+        })
+        valid = bool(result.get("ok"))
+    except Exception:
+        valid = False
+    await query.answer(ok=valid, error_message=None if valid else "Счёт недействителен или сервер временно недоступен.")
 
-    with db() as con:
-        invoice = con.execute(
-            "SELECT uid,stars,status FROM invoices WHERE payload=?",
-            (query.invoice_payload,)
-        ).fetchone()
-
-    valid = (
-        invoice is not None
-        and invoice["uid"] == query.from_user.id
-        and invoice["stars"] == query.total_amount
-        and invoice["status"] == "pending"
-    )
-
-    if valid:
-        await query.answer(ok=True)
-    else:
-        await query.answer(
-            ok=False,
-            error_message="Счёт недействителен."
-        )
-
-
-# УСПЕШНАЯ ОПЛАТА
-async def paid(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payment = update.message.successful_payment
     user = update.effective_user
-
-    payload = payment.invoice_payload
-    charge = payment.telegram_payment_charge_id
-
-    with db() as con:
-        con.execute("BEGIN IMMEDIATE")
-
-        invoice = con.execute(
-            "SELECT * FROM invoices WHERE payload=?",
-            (payload,)
-        ).fetchone()
-
-        if (
-            not invoice
-            or invoice["uid"] != user.id
-            or invoice["stars"] != payment.total_amount
-            or invoice["status"] != "pending"
-        ):
-            await update.message.reply_text(
-                "⚠️ Не удалось сопоставить платёж. Обратитесь в поддержку."
+    try:
+        result = await api_post("/api/internal/payment", {
+            "payload": payment.invoice_payload,
+            "user_id": user.id,
+            "total_amount": payment.total_amount,
+            "currency": payment.currency,
+            "charge_id": payment.telegram_payment_charge_id
+        })
+    except Exception:
+        await update.message.reply_text(
+            "⚠️ Telegram подтвердил оплату, но сервер пока не смог обновить баланс. "
+            "Не оплачивай повторно — обратись к администратору."
+        )
+        if ADMIN_ID:
+            await context.bot.send_message(
+                ADMIN_ID,
+                f"⚠️ Нужна проверка платежа!\nИгрок ID: {user.id}\n"
+                f"Payload: {payment.invoice_payload}\nCharge: {payment.telegram_payment_charge_id}"
             )
-            return
-
-        if con.execute(
-            "SELECT 1 FROM payments WHERE charge_id=?",
-            (charge,)
-        ).fetchone():
-            return
-
-        con.execute(
-            """INSERT INTO payments
-            (charge_id,uid,stars,coins,created_at)
-            VALUES(?,?,?,?,?)""",
-            (
-                charge,
-                user.id,
-                payment.total_amount,
-                invoice["coins"],
-                int(time.time())
-            )
-        )
-
-        con.execute(
-            "UPDATE users SET bal=bal+? WHERE id=?",
-            (invoice["coins"], user.id)
-        )
-
-        con.execute(
-            "UPDATE invoices SET status='paid' WHERE payload=?",
-            (payload,)
-        )
-
-        new_balance = con.execute(
-            "SELECT bal FROM users WHERE id=?",
-            (user.id,)
-        ).fetchone()["bal"]
-
+        return
     await update.message.reply_text(
-        f"⭐ Оплата прошла успешно!\n"
-        f"Зачислено: {invoice['coins']} монет\n"
-        f"Баланс: {new_balance}"
+        f"⭐ Оплата подтверждена!\nЗачислено: {result.get('credited', 0)} монет\n"
+        f"Баланс: {result['balance']} монет"
     )
-
     if ADMIN_ID:
         await context.bot.send_message(
             ADMIN_ID,
-            f"⭐ ПОПОЛНЕНИЕ NEON SLOTS\n\n"
-            f"Игрок: {user.full_name}\n"
-            f"Username: @{user.username or 'нет'}\n"
-            f"ID: {user.id}\n"
-            f"Оплата: {payment.total_amount} Stars\n"
-            f"Зачислено: {invoice['coins']} монет"
+            f"⭐ ПОПОЛНЕНИЕ NEON SLOTS\nИгрок: {user.full_name}\n"
+            f"ID: {user.id}\nОплата: {payment.total_amount} Stars\n"
+            f"Баланс: {result['balance']} монет"
         )
 
-
-# ЗАЯВКИ НА ВЫВОД
-async def withdrawals(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def withdrawals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-
-    with db() as con:
-        rows = con.execute(
-            """SELECT id,uid,amount FROM withdrawals
-            WHERE status='pending'
-            ORDER BY id DESC LIMIT 20"""
-        ).fetchall()
-
-    if not rows:
-        await update.message.reply_text(
-            "📭 Новых заявок нет."
-        )
+    try:
+        data = await api_get("/api/internal/withdrawals")
+    except Exception:
+        await update.message.reply_text("Не удалось загрузить заявки с сервера.")
         return
-
+    rows = data.get("items", [])
+    if not rows:
+        await update.message.reply_text("📭 Новых заявок нет.")
+        return
     lines = ["📤 ЗАЯВКИ НА ВЫВОД"]
-
     for row in rows:
         lines.append(
-            f"\nЗаявка #{row['id']}\n"
-            f"Игрок ID: {row['uid']}\n"
-            f"Сумма: {row['amount']}\n"
-            f"/approve {row['id']}\n"
-            f"/reject {row['id']}"
+            f"\nЗаявка #{row['id']}\nИгрок ID: {row['uid']}\n"
+            f"Сумма: {row['amount']} монет\n/approve {row['id']}\n/reject {row['id']}"
         )
-
     await update.message.reply_text("\n".join(lines))
 
-
-# ОБРАБОТКА ЗАЯВОК
-async def resolve(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    approved: bool
-):
+async def resolve(update: Update, context: ContextTypes.DEFAULT_TYPE, approved: bool):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⛔ Нет доступа.")
         return
-
     if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text(
-            "Укажи номер заявки: /approve 12"
-        )
+        await update.message.reply_text("Укажи номер заявки, например: /approve 12")
         return
-
     wid = int(context.args[0])
-
-    with db() as con:
-        con.execute("BEGIN IMMEDIATE")
-
-        row = con.execute(
-            "SELECT * FROM withdrawals WHERE id=?",
-            (wid,)
-        ).fetchone()
-
-        if not row or row["status"] != "pending":
-            await update.message.reply_text(
-                "Заявка не найдена или уже обработана."
-            )
-            return
-
-        status = "approved" if approved else "rejected"
-
-        con.execute(
-            "UPDATE withdrawals SET status=? WHERE id=?",
-            (status, wid)
-        )
-
-        if not approved:
-            con.execute(
-                "UPDATE users SET bal=bal+? WHERE id=?",
-                (row["amount"], row["uid"])
-            )
-
+    try:
+        result = await api_post(f"/api/internal/withdrawals/{wid}/resolve", {"approved": approved})
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            await update.message.reply_text("Заявка не найдена или уже обработана.")
+        else:
+            await update.message.reply_text("Сервер не смог обработать заявку.")
+        return
+    except Exception:
+        await update.message.reply_text("Не удалось связаться с сервером.")
+        return
+    status = result["status"]
+    user_id = result["user_id"]
     try:
         await context.bot.send_message(
-            row["uid"],
-            f"Заявка #{wid}: "
-            + (
-                "одобрена. Выплата производится отдельно."
-                if approved
-                else "отклонена. Монеты возвращены."
+            user_id,
+            f"Заявка #{wid}: " + (
+                "одобрена. Это тестовая отметка, денежная выплата не производится."
+                if approved else "отклонена. Монеты возвращены на баланс."
             )
         )
     except Exception:
         pass
-
-    await update.message.reply_text(
-        f"Заявка #{wid}: {status}"
-    )
-
+    await update.message.reply_text(f"Заявка #{wid}: {status}. Баланс игрока: {result['balance']} монет.")
 
 async def approve(update, context):
     await resolve(update, context, True)
 
-
 async def reject(update, context):
     await resolve(update, context, False)
 
-
-# ЗАПУСК
 def main():
-    init_db()
-
-    application = (
-        ApplicationBuilder()
-        .token(TOKEN)
-        .build()
-    )
-
+    if not TOKEN or not PAYMENT_SECRET or not ADMIN_ID:
+        raise RuntimeError("Нужно задать BOT_TOKEN, ADMIN_ID и PAYMENT_SECRET.")
+    builder = ApplicationBuilder().token(TOKEN)
+    if TEST_SERVER:
+        builder = builder.base_url("https://api.telegram.org/bot{token}/test")
+        builder = builder.base_file_url("https://api.telegram.org/file/bot{token}/test")
+    application = builder.build()
     handlers = [
-        ("start", start),
-        ("balance", balance),
-        ("myid", myid),
-        ("terms", terms),
-        ("support", support),
-        ("withdrawals", withdrawals),
-        ("approve", approve),
-        ("reject", reject)
+        ("start", start), ("balance", balance), ("myid", myid),
+        ("terms", terms), ("support", support), ("withdrawals", withdrawals),
+        ("approve", approve), ("reject", reject)
     ]
-
     for command, handler in handlers:
-        application.add_handler(
-            CommandHandler(command, handler)
-        )
-
-    application.add_handler(
-        PreCheckoutQueryHandler(precheckout)
-    )
-
-    application.add_handler(
-        MessageHandler(filters.SUCCESSFUL_PAYMENT, paid)
-    )
-
+        application.add_handler(CommandHandler(command, handler))
+    application.add_handler(PreCheckoutQueryHandler(precheckout))
+    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, paid))
     print("NEON SLOTS BOT STARTED")
-
     application.run_polling()
-
 
 if __name__ == "__main__":
     main()
