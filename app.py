@@ -564,7 +564,7 @@ async def withdraw(body: Amount, request: Request):
         row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
         balance = int(row["bal"]) if row else 0
         if amount > balance:
-            raise HTTPException(400, f"Недостаточно монет. Баланс: {balance}")
+            raise HTTPException(400, f"Недостаточно ⭐. Баланс: {balance} ⭐")
         con.execute("UPDATE users SET bal=bal-? WHERE id=?", (amount,uid))
         cur = con.execute("INSERT INTO withdrawals(uid,amount,status,created_at) VALUES(?,?,'pending',?)",
                           (uid,amount,int(time.time())))
