@@ -193,19 +193,50 @@ async def home():
 async def me(request: Request):
     user = await auth(request)
     bal = ensure_user(user)
+    uid = int(user["id"])
     with connect() as con:
         games = con.execute("SELECT bet,payout,symbols,created_at FROM games WHERE uid=? ORDER BY id DESC LIMIT 8",
-                             (int(user["id"]),)).fetchall()
+                             (uid,)).fetchall()
         withdrawals = con.execute("SELECT id,amount,status,created_at FROM withdrawals WHERE uid=? ORDER BY id DESC LIMIT 5",
-                                  (int(user["id"]),)).fetchall()
-    return {"user":{"id":int(user["id"]),"name":user.get("first_name","Игрок"),
+                                  (uid,)).fetchall()
+        stats = con.execute("""SELECT COUNT(*) AS games,
+            SUM(CASE WHEN status='cashed_out' THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END) AS losses,
+            COALESCE(SUM(payout),0) AS payout,
+            COALESCE(MAX(CASE WHEN status='cashed_out' AND bet>0 THEN 1.0*payout/bet ELSE 0 END),0) AS best_multiplier
+            FROM mines_games WHERE uid=? AND status IN ('lost','cashed_out')""", (uid,)).fetchone()
+    return {"user":{"id":uid,"name":user.get("first_name","Игрок"),
                     "username":user.get("username","")},
             "balance":bal, "games":[dict(x) for x in games],
+            "stats":dict(stats),
             "withdrawals":[dict(x) for x in withdrawals],
             "coins_per_star":COINS_PER_STAR, "min_withdraw":MIN_WITHDRAW}
 
 class Amount(BaseModel):
     amount: int = Field(ge=1, le=10000000)
+
+@app.get("/api/leaderboard")
+async def leaderboard(request: Request):
+    await auth(request)
+    with connect() as con:
+        rows = con.execute("""SELECT u.first_name, u.username,
+            COUNT(m.id) AS games,
+            SUM(CASE WHEN m.status='cashed_out' THEN 1 ELSE 0 END) AS wins,
+            COALESCE(SUM(m.payout-m.bet),0) AS profit
+            FROM mines_games m JOIN users u ON u.id=m.uid
+            WHERE m.status IN ('lost','cashed_out')
+            GROUP BY m.uid
+            ORDER BY profit DESC, wins DESC, games DESC
+            LIMIT 10""").fetchall()
+    items = []
+    for row in rows:
+        name = row["first_name"] or "Игрок"
+        if row["username"]:
+            name += " @" + row["username"]
+        items.append({"name": name, "games": int(row["games"]),
+                      "wins": int(row["wins"] or 0), "profit": int(row["profit"] or 0)})
+    return {"items": items}
+
 
 @app.post("/api/deposit")
 async def deposit(body: Amount, request: Request):
