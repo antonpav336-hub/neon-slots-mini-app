@@ -19,9 +19,9 @@ from telegram.ext import (
 )
 
 # НАСТРОЙКИ
-TOKEN = os.environ["5001710974:AAG6fs0FC9bsdG-CDzXxoherhhKE2NyydKw"]
+TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-WEBAPP_URL = os.environ["https://neon-slots-mini-app.onrender.com"]
+WEBAPP_URL = os.getenv("WEBAPP_URL", "")
 
 DB_PATH = os.getenv("DB_PATH", "casino.db")
 MIN_WITHDRAW = int(os.getenv("MIN_WITHDRAW", "50"))
