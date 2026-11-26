@@ -55,20 +55,18 @@ body{background:radial-gradient(ellipse at 10% 0%,#26356a55,transparent 38%),rad
 .mines-options{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
 .mines-options button{background:#202743;color:white;border:1px solid #343d60;border-radius:10px;padding:9px 12px;font-weight:800}
 .mines-options button.selected{background:#3b2a60;border-color:#a16bff;color:#e5d3ff}
-.mi<section class="mines-card">
-<div class="slot-head"><strong>💣 MINES</strong><span class="live">LIVE GAME</span></div>
-<div class="bet-row"><span class="bet-label">СТАВКА</span><span class="bet-value" id="betVal">10 монет</span></div>
-<div class="mines-options" id="betOptions"><button data-bet="10" class="selected">10</button><button data-bet="25">25</button><button data-bet="50">50</button><button data-bet="100">100</button><button data-bet="max">MAX</button></div>
-<div class="bet-row"><span class="bet-label">КОЛИЧЕСТВО МИН</span><span class="bet-value" id="mineVal">3</span></div>
-<div class="mines-options" id="mineOptions"><button data-mines="1">1</button><button data-mines="3" class="selected">3</button><button data-mines="5">5</button><button data-mines="10">10</button><button data-mines="15">15</button><button data-mines="20">20</button></div>
-<div class="mines-meta"><span>МНОЖИТЕЛЬ<b id="multiplier">x1.00</b></span><span>ЗАБРАТЬ<b id="cashout">0 🪙</b></span></div>
-<div class="mines-board" id="minesBoard">
-<button class="mine-cell" data-cell="0" disabled>?</button><button class="mine-cell" data-cell="1" disabled>?</button><button class="mine-cell" data-cell="2" disabled>?</button><button class="mine-cell" data-cell="3" disabled>?</button><button class="mine-cell" data-cell="4" disabled>?</button><button class="mine-cell" data-cell="5" disabled>?</button><button class="mine-cell" data-cell="6" disabled>?</button><button class="mine-cell" data-cell="7" disabled>?</button><button class="mine-cell" data-cell="8" disabled>?</button><button class="mine-cell" data-cell="9" disabled>?</button><button class="mine-cell" data-cell="10" disabled>?</button><button class="mine-cell" data-cell="11" disabled>?</button><button class="mine-cell" data-cell="12" disabled>?</button><button class="mine-cell" data-cell="13" disabled>?</button><button class="mine-cell" data-cell="14" disabled>?</button><button class="mine-cell" data-cell="15" disabled>?</button><button class="mine-cell" data-cell="16" disabled>?</button><button class="mine-cell" data-cell="17" disabled>?</button><button class="mine-cell" data-cell="18" disabled>?</button><button class="mine-cell" data-cell="19" disabled>?</button><button class="mine-cell" data-cell="20" disabled>?</button><button class="mine-cell" data-cell="21" disabled>?</button><button class="mine-cell" data-cell="22" disabled>?</button><button class="mine-cell" data-cell="23" disabled>?</button><button class="mine-cell" data-cell="24" disabled>?</button>
-</div>
-<div class="mines-actions"><button id="minesStart">НАЧАТЬ • 10 🪙</button><button id="minesCashout" class="secondary" disabled>ЗАБРАТЬ ВЫИГРЫШ</button></div>
-<div class="result" id="minesResult">Выбери ставку и количество мин</div>
-</section>
-.5)}
+..mines-meta{display:flex;justify-content:space-between;gap:12px;margin:15px 0;padding:12px 14px;border:1px solid #303b60;border-radius:14px;background:#0a1020aa;font-size:9px;color:var(--muted);letter-spacing:.7px}
+.mines-meta span{display:flex;flex-direction:column;gap:5px}.mines-meta b{font-size:18px;color:#fff;letter-spacing:0}
+.mines-board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:14px 0}
+.mine-cell{aspect-ratio:1;border:1px solid #43527d;border-radius:13px;background:linear-gradient(145deg,#25365d,#151d35);color:#dce9ff;font-size:25px;font-weight:900;box-shadow:inset 0 0 15px #0005,0 5px 12px #0004;transition:transform .12s,border-color .12s,background .12s}
+.mine-cell:not(:disabled):active{transform:scale(.94)}.mine-cell:disabled{opacity:1}
+.mine-cell.safe{background:linear-gradient(145deg,#164b68,#102b46);border-color:#65f4ff;box-shadow:0 0 17px #65f4ff35}
+.mine-cell.bomb{background:linear-gradient(145deg,#65263f,#35182e);border-color:#ff557d;box-shadow:0 0 17px #ff557d45}
+.mines-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.mines-actions button{border:0;border-radius:13px;padding:14px 8px;background:linear-gradient(105deg,#ff4fae,#a34dff 55%,#4b8dff);color:#fff;font-size:11px;font-weight:900;letter-spacing:.3px}
+.mines-actions button.secondary{background:linear-gradient(100deg,#72f4ff,#75e8bd);color:#07111e}
+.mines-actions button:disabled{opacity:.45;filter:saturate(.5)}
+@media(max-width:360px){.mine-cell{font-size:20px}.mines-actions button{font-size:10px;padding:12px 5px}}
 </style></head>
 <body><main class="wrap">
 <header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
