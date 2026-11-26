@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#090b16"><title>NEON SLOTS</title>
+<meta name="theme-color" content="#090b16"><title>NEON MINES</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
@@ -51,28 +51,39 @@ body{background:radial-gradient(ellipse at 10% 0%,#26356a55,transparent 38%),rad
 .miner-note{font-size:9px;color:#8792b4;line-height:1.5;text-align:center;margin-top:10px}
 @media(min-width:600px){.reel{height:122px}}
 
+.mines-card{margin-top:18px;padding:19px;border:1px solid #3a4771;border-radius:24px;background:radial-gradient(circle at 90% 0%,#3a2c7950,transparent 38%),linear-gradient(145deg,#192544,#101528);box-shadow:0 18px 42px #0007}
+.mines-options{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.mines-options button{background:#202743;color:white;border:1px solid #343d60;border-radius:10px;padding:9px 12px;font-weight:800}
+.mines-options button.selected{background:#3b2a60;border-color:#a16bff;color:#e5d3ff}
+.mi<section class="mines-card">
+<div class="slot-head"><strong>💣 MINES</strong><span class="live">LIVE GAME</span></div>
+<div class="bet-row"><span class="bet-label">СТАВКА</span><span class="bet-value" id="betVal">10 монет</span></div>
+<div class="mines-options" id="betOptions"><button data-bet="10" class="selected">10</button><button data-bet="25">25</button><button data-bet="50">50</button><button data-bet="100">100</button><button data-bet="max">MAX</button></div>
+<div class="bet-row"><span class="bet-label">КОЛИЧЕСТВО МИН</span><span class="bet-value" id="mineVal">3</span></div>
+<div class="mines-options" id="mineOptions"><button data-mines="1">1</button><button data-mines="3" class="selected">3</button><button data-mines="5">5</button><button data-mines="10">10</button><button data-mines="15">15</button><button data-mines="20">20</button></div>
+<div class="mines-meta"><span>МНОЖИТЕЛЬ<b id="multiplier">x1.00</b></span><span>ЗАБРАТЬ<b id="cashout">0 🪙</b></span></div>
+<div class="mines-board" id="minesBoard">
+<button class="mine-cell" data-cell="0" disabled>?</button><button class="mine-cell" data-cell="1" disabled>?</button><button class="mine-cell" data-cell="2" disabled>?</button><button class="mine-cell" data-cell="3" disabled>?</button><button class="mine-cell" data-cell="4" disabled>?</button><button class="mine-cell" data-cell="5" disabled>?</button><button class="mine-cell" data-cell="6" disabled>?</button><button class="mine-cell" data-cell="7" disabled>?</button><button class="mine-cell" data-cell="8" disabled>?</button><button class="mine-cell" data-cell="9" disabled>?</button><button class="mine-cell" data-cell="10" disabled>?</button><button class="mine-cell" data-cell="11" disabled>?</button><button class="mine-cell" data-cell="12" disabled>?</button><button class="mine-cell" data-cell="13" disabled>?</button><button class="mine-cell" data-cell="14" disabled>?</button><button class="mine-cell" data-cell="15" disabled>?</button><button class="mine-cell" data-cell="16" disabled>?</button><button class="mine-cell" data-cell="17" disabled>?</button><button class="mine-cell" data-cell="18" disabled>?</button><button class="mine-cell" data-cell="19" disabled>?</button><button class="mine-cell" data-cell="20" disabled>?</button><button class="mine-cell" data-cell="21" disabled>?</button><button class="mine-cell" data-cell="22" disabled>?</button><button class="mine-cell" data-cell="23" disabled>?</button><button class="mine-cell" data-cell="24" disabled>?</button>
+</div>
+<div class="mines-actions"><button id="minesStart">НАЧАТЬ • 10 🪙</button><button id="minesCashout" class="secondary" disabled>ЗАБРАТЬ ВЫИГРЫШ</button></div>
+<div class="result" id="minesResult">Выбери ставку и количество мин</div>
+</section>
+.5)}
 </style></head>
 <body><main class="wrap">
-<header class="top"><div class="brand">NEON<span>•</span>SLOTS</div><div class="avatar" id="avatar">N</div></header>
-<section class="hero"><div class="eyebrow">WELCOME TO THE GAME</div><h1>SPIN & WIN</h1><p>Твой следующий спин может быть удачным</p></section>
+<header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
+<section class="hero"><div class="eyebrow">RISK • REVEAL • CASH OUT</div><h1>NEON MINES</h1><p>Открывай безопасные клетки и забирай растущий множитель</p></section>
 <section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">монет</span></div></div><div class="coin">🪙</div></section>
 <section class="slot-card"><div class="slot-head"><strong>🎰 NEON JACKPOT</strong><span class="live">LIVE GAME</span></div>
 <div class="reels"><div class="reel" id="r0">🍒</div><div class="reel" id="r1">🍋</div><div class="reel" id="r2">🍇</div></div>
 <div class="bet-row"><span class="bet-label">РАЗМЕР СТАВКИ</span><span class="bet-value" id="betVal">10 монет</span></div>
 <div class="bet-controls"><button data-bet="10" class="selected">10</button><button data-bet="25">25</button><button data-bet="50">50</button><button data-bet="100">100</button><button data-bet="max">MAX</button></div>
 <button class="spin" id="spin">КРУТИТЬ • 10 🪙</button><div class="result" id="result">Удачи! 🍀</div></section>
-<div class="section-title">NEON MINER <small>энергия • бонусы</small></div>
-<section class="miner-card">
-  <div class="miner-top"><div><div class="miner-title">⛏️ КРИПТО-ШАХТА</div><div class="miner-sub">Запускай добычу игровых очков</div></div><div class="miner-icon">⛏️</div></div>
-  <div class="miner-stats"><div class="miner-stat"><small>ДОБЫТО ОЧКОВ</small><b id="minerPoints">0 ✦</b></div><div class="miner-stat"><small>СЛЕДУЮЩИЙ БУСТ</small><b id="minerTimer">ГОТОВ</b></div></div>
-  <button class="miner-claim" id="minerClaim">⚡ ЗАПУСТИТЬ МАЙНИНГ</button>
-  <div class="miner-note">Очки майнера — отдельный игровой рейтинг. Они не являются деньгами, не покупаются и не выводятся.</div>
-</section>
 <div class="section-title">КАССА <small>Stars • заявки</small></div>
 <div class="actions"><button class="action" id="deposit"><span class="ico">⭐</span><b>Пополнить</b><small>Оплата Telegram Stars</small></button><button class="action" id="withdraw"><span class="ico">💸</span><b>Вывести</b><small>Заявка администратору</small></button></div>
 <div class="section-title">ИСТОРИЯ ИГР <small>Последние раунды</small></div><section class="panel" id="history"><div class="muted" style="font-size:11px">Загрузка истории…</div></section>
 <div class="section-title">ПРОФИЛЬ <small id="username">Telegram</small></div><section class="panel" id="profile"><div class="muted" style="font-size:11px">Загрузка профиля…</div></section>
-<div class="footer">NEON SLOTS • Игровой тестовый проект. Играйте ответственно.<br>Покупки и заявки доступны только после проверки Telegram.</div>
+<div class="footer">NEON MINES • Игровой тестовый проект. Играйте ответственно.<br>Покупки и заявки доступны только после проверки Telegram.</div>
 </main>
 <div class="modal" id="modal"><div class="sheet"><h3 id="modalTitle">Пополнение</h3><p id="modalDesc">Укажи сумму.</p><input id="amount" type="number" min="1" value="50"><button id="confirm">Продолжить</button><button class="cancel" id="cancel">Отмена</button></div></div><div class="toast" id="toast"></div>
 <script>
@@ -86,8 +97,13 @@ function render(d){window.userName=d.user.name;setBalance(d.balance);$('username
 $('history').innerHTML=d.games.length?d.games.map(g=>`<div class="history-item"><span>${esc(g.symbols)} <span class="muted">• ставка ${g.bet}</span></span><span class="${g.payout?'positive':'negative'}">${g.payout?'+'+g.payout:'−'+g.bet}</span></div>`).join(''):'<div class="muted" style="font-size:11px">Пока нет сыгранных раундов</div>'}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function refresh(){if(!initData){toast('Открой сайт через кнопку «Играть» в Telegram-боте.');$('history').innerHTML='<div class="muted" style="font-size:11px">Нет Telegram-сессии. Запусти бота и открой Mini App.</div>';return}try{render(await api('/api/me'))}catch(e){toast(e.message)}}
-document.querySelectorAll('[data-bet]').forEach(b=>b.onclick=()=>{const v=b.dataset.bet;state.bet=v==='max'?Math.max(1,state.balance):Number(v);document.querySelectorAll('[data-bet]').forEach(x=>x.classList.toggle('selected',x===b));$('betVal').textContent=state.bet+' монет';$('spin').textContent='КРУТИТЬ • '+state.bet+' 🪙'});
-$('spin').onclick=async()=>{if(state.busy)return;if(!initData){toast('Открой приложение из Telegram');return}state.busy=true;$('spin').disabled=true;$('result').textContent='БАРАБАНЫ ВРАЩАЮТСЯ…';document.querySelectorAll('.reel').forEach(x=>{x.classList.add('spinning');x.classList.remove('win')});const symbols=['🍒','🍋','🍇','🔔','7️⃣'];let timer=setInterval(()=>document.querySelectorAll('.reel').forEach(x=>x.textContent=symbols[Math.floor(Math.random()*symbols.length)]),75);try{const d=await api('/api/spin',{amount:state.bet});setTimeout(()=>{clearInterval(timer);d.symbols.forEach((s,i)=>{const el=$('r'+i);el.textContent=s;el.classList.remove('spinning');if(d.multiplier>0)el.classList.add('win')});setBalance(d.balance);$('result').textContent=d.payout?'🎉 ВЫИГРЫШ +'+d.payout+' • x'+d.multiplier:'😢 Не повезло. Попробуй ещё раз';refresh()},850)}catch(e){clearInterval(timer);document.querySelectorAll('.reel').forEach(x=>x.classList.remove('spinning'));toast(e.message);$('result').textContent='';}finally{setTimeout(()=>{state.busy=false;$('spin').disabled=false},900)}};
+let minesState={bet:10,mines:3,gameId:null,active:false};
+document.querySelectorAll('[data-bet]').forEach(b=>b.onclick=()=>{if(minesState.active)return;const v=b.dataset.bet;minesState.bet=v==='max'?Math.max(1,state.balance):Number(v);document.querySelectorAll('[data-bet]').forEach(x=>x.classList.toggle('selected',x===b));$('betVal').textContent=minesState.bet+' монет';$('minesStart').textContent='НАЧАТЬ • '+minesState.bet+' 🪙'});
+document.querySelectorAll('[data-mines]').forEach(b=>b.onclick=()=>{if(minesState.active)return;minesState.mines=Number(b.dataset.mines);$('mineVal').textContent=minesState.mines;document.querySelectorAll('[data-mines]').forEach(x=>x.classList.toggle('selected',x===b))});
+function resetMines(){document.querySelectorAll('.mine-cell').forEach(c=>{c.textContent='?';c.className='mine-cell';c.disabled=true});$('multiplier').textContent='x1.00';$('cashout').textContent='0 🪙';$('minesCashout').disabled=true}
+$('minesStart').onclick=async()=>{if(state.busy||minesState.active)return;state.busy=true;$('minesStart').disabled=true;try{const d=await api('/api/mines/start',{amount:minesState.bet,mines:minesState.mines});minesState.gameId=d.game_id;minesState.active=true;setBalance(d.balance);resetMines();document.querySelectorAll('.mine-cell').forEach(c=>c.disabled=false);$('minesStart').textContent='ИГРА ИДЁТ';$('minesResult').textContent='Выбирай клетку. Множитель растёт после каждого алмаза.'}catch(e){toast(e.message)}finally{state.busy=false;$('minesStart').disabled=minesState.active}};
+document.querySelectorAll('.mine-cell').forEach(c=>c.onclick=async()=>{if(!minesState.active||state.busy||c.disabled)return;state.busy=true;c.disabled=true;try{const d=await api('/api/mines/pick',{game_id:minesState.gameId,cell:Number(c.dataset.cell)});if(d.status==='lost'){minesState.active=false;d.mines.forEach(i=>{const el=document.querySelector('[data-cell="'+i+'"]');el.textContent='💣';el.classList.add('bomb');el.disabled=true});c.textContent='💥';c.classList.add('bomb');setBalance(d.balance);$('minesResult').textContent='МИНА! Ставка потеряна.';$('minesStart').textContent='ИГРАТЬ ЕЩЁ';$('minesStart').disabled=false;$('minesCashout').disabled=true;return}c.textContent='💎';c.classList.add('safe');$('multiplier').textContent='x'+Number(d.multiplier).toFixed(2);$('cashout').textContent=Number(d.cashout).toLocaleString('ru-RU')+' 🪙';$('minesCashout').disabled=false;$('minesResult').textContent='Безопасно! Продолжить или забрать выигрыш?'}catch(e){c.disabled=false;toast(e.message)}finally{state.busy=false}});
+$('minesCashout').onclick=async()=>{if(!minesState.active||state.busy)return;state.busy=true;$('minesCashout').disabled=true;try{const d=await api('/api/mines/cashout',{game_id:minesState.gameId});minesState.active=false;setBalance(d.balance);$('minesResult').textContent='🎉 Забрано '+d.payout+' монет • x'+Number(d.multiplier).toFixed(2);$('minesStart').textContent='ИГРАТЬ ЕЩЁ';$('minesStart').disabled=false;document.querySelectorAll('.mine-cell').forEach(c=>c.disabled=true);refresh()}catch(e){toast(e.message);$('minesCashout').disabled=false}finally{state.busy=false}};
 function openModal(mode){state.mode=mode;$('modalTitle').textContent=mode==='deposit'?'Пополнить баланс ⭐':'Заявка на вывод 💸';$('modalDesc').textContent=mode==='deposit'?'Укажи количество Telegram Stars. Монеты будут начислены после успешной оплаты.':'Укажи количество монет. Сумма будет временно зарезервирована до решения администратора.';$('amount').value=mode==='deposit'?50:Math.min(50,state.balance);$('amount').min=mode==='deposit'?1:50;$('modal').classList.add('show')}
 $('deposit').onclick=()=>openModal('deposit');$('withdraw').onclick=()=>openModal('withdraw');$('cancel').onclick=()=>$('modal').classList.remove('show');
 $('confirm').onclick=async()=>{const amount=Number($('amount').value);if(!Number.isInteger(amount)||amount<1){toast('Введи корректную сумму');return}try{const d=await api(state.mode==='deposit'?'/api/deposit':'/api/withdraw',{amount});$('modal').classList.remove('show');toast(d.message||'Готово');if(state.mode==='withdraw'){setBalance(d.balance);refresh()}else if(tg){tg.showAlert('Счёт отправлен в чат с ботом. Оплати его там, затем вернись в приложение.')}}catch(e){toast(e.message)}};
