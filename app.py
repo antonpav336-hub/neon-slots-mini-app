@@ -22,7 +22,8 @@ def telegram_api_url(method: str) -> str:
     suffix = "/test" if TELEGRAM_TEST_SERVER else ""
     return f"https://api.telegram.org/bot{BOT_TOKEN}{suffix}/{method}"
 COINS_PER_STAR = int(os.getenv("COINS_PER_STAR", "1"))
-MIN_WITHDRAW = 2500\nMIN_DEPOSIT = 100
+MIN_WITHDRAW = 2500
+MIN_DEPOSIT = 100
 MAX_BET = int(os.getenv("MAX_BET", "100000"))
 INIT_DATA_MAX_AGE = int(os.getenv("INIT_DATA_MAX_AGE", "86400"))
 
@@ -243,8 +244,8 @@ async def deposit(body: Amount, request: Request):
     user = await auth(request)
     uid = int(user["id"])
     stars = body.amount
-    if stars < 1 or stars > 10000:
-        raise HTTPException(400, "Можно купить от 1 до 10000 Stars за один раз.")
+    if stars < MIN_DEPOSIT or stars > 10000:
+        raise HTTPException(400, f"Минимальное пополнение: {MIN_DEPOSIT} ⭐. Максимум: 10000 ⭐.")
     if not BOT_TOKEN:
         raise HTTPException(503, "Пополнение пока не настроено.")
     payload = "dep_" + secrets.token_urlsafe(18)
@@ -502,7 +503,7 @@ async def spin(body: Amount, request: Request):
         else:
             balance = int(row["bal"])
         if bet > balance:
-            raise HTTPException(400, f"Недостаточно монет. Баланс: {balance}")
+            raise HTTPException(400, f"Недостаточно ⭐. Баланс: {balance} ⭐")
         new_balance = balance - bet + payout
         con.execute("UPDATE users SET bal=? WHERE id=?", (new_balance,uid))
         con.execute("INSERT INTO games(uid,bet,payout,symbols,created_at) VALUES(?,?,?,?,?)",
@@ -510,7 +511,7 @@ async def spin(body: Amount, request: Request):
     outcome = "ВЫИГРЫШ" if payout else "ПРОИГРЫШ"
     await notify_admin(
         f"🎰 {outcome}\nИгрок: {display_user(user)}\nID: {uid}\n"
-        f"Ставка: {bet} монет\nВыплата: {payout} монет\nКомбинация: {' '.join(reels)}\nБаланс: {new_balance}"
+        f"Ставка: {bet} ⭐\nВыплата: {payout} ⭐\nКомбинация: {' '.join(reels)}\nБаланс: {new_balance}"
     )
     return {"symbols":reels,"bet":bet,"multiplier":mult,"payout":payout,
             "balance":new_balance,"result":outcome}
@@ -557,7 +558,7 @@ async def withdraw(body: Amount, request: Request):
     uid = int(user["id"])
     amount = body.amount
     if amount < MIN_WITHDRAW:
-        raise HTTPException(400, f"Минимальная заявка: {MIN_WITHDRAW} монет.")
+        raise HTTPException(400, f"Минимальная заявка: {MIN_WITHDRAW} ⭐.")
     with connect() as con:
         con.execute("BEGIN IMMEDIATE")
         row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
