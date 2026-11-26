@@ -8,7 +8,7 @@ from telegram.ext import (
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://neon-slots-mini-app.onrender.com").strip()
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://neon-slots-mini-app.onrender.com").strip().rstrip("/") + "/?v=neon-mines-20261127"
 API_URL = os.getenv("API_URL", "https://neon-slots-mini-app.onrender.com").rstrip("/")
 PAYMENT_SECRET = os.getenv("PAYMENT_SECRET", "").strip()
 TEST_SERVER = os.getenv("TELEGRAM_TEST_SERVER", "1") == "1"
@@ -39,10 +39,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         balance = "открой приложение для загрузки"
     keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🎰 ОТКРЫТЬ NEON SLOTS", web_app=WebAppInfo(url=WEBAPP_URL))
+        InlineKeyboardButton("💣 ОТКРЫТЬ NEON MINES", web_app=WebAppInfo(url=WEBAPP_URL))
     ]])
     await update.message.reply_text(
-        f"🎰 Добро пожаловать в NEON SLOTS!\n\n"
+        f"💣 Добро пожаловать в NEON MINES!\n\n"
         f"👤 Игрок: {user.first_name}\n💰 Баланс: {balance}\n\n"
         "Нажми кнопку ниже, чтобы открыть игру.",
         reply_markup=keyboard
