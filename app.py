@@ -116,6 +116,11 @@ def init_db():
             revealed TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'active',
             payout INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS case_opens(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER NOT NULL,
+            case_id TEXT NOT NULL, case_name TEXT NOT NULL, price INTEGER NOT NULL,
+            multiplier REAL NOT NULL, payout INTEGER NOT NULL, created_at INTEGER NOT NULL
+        );
         """)
 init_db()
 
@@ -239,6 +244,68 @@ async def leaderboard(request: Request):
         items.append({"name": name, "games": int(row["games"]),
                       "wins": int(row["wins"] or 0), "profit": int(row["profit"] or 0)})
     return {"items": items}
+
+
+CASE_CONFIG = {
+    "starter": {"name": "STARTER", "price": 50},
+    "neon": {"name": "NEON", "price": 100},
+    "crystal": {"name": "CRYSTAL", "price": 250},
+    "royal": {"name": "ROYAL", "price": 500},
+    "legend": {"name": "LEGEND", "price": 1000},
+    "cosmic": {"name": "COSMIC", "price": 2500},
+}
+
+@app.get("/api/cases/history")
+async def cases_history(request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    with connect() as con:
+        rows = con.execute(
+            "SELECT case_name,price,multiplier,payout,created_at FROM case_opens WHERE uid=? ORDER BY id DESC LIMIT 10",
+            (uid,)
+        ).fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.post("/api/cases/open")
+async def cases_open(body: dict, request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    case_id = body.get("case_id")
+    case = CASE_CONFIG.get(case_id) if isinstance(case_id, str) else None
+    if not case:
+        raise HTTPException(400, "Неизвестный кейс.")
+
+    # Server-side RNG and payout table: 0x 15%, 0.5x 25%, 0.8x 25%,
+    # 1x 20%, 1.5x 12%, 5x 3%.
+    roll = secrets.randbelow(10000)
+    outcomes = [
+        (1500, 0.0), (4000, 0.5), (6500, 0.8),
+        (8500, 1.0), (9700, 1.5), (10000, 5.0)
+    ]
+    multiplier = next(mult for ceiling, mult in outcomes if roll < ceiling)
+    payout = int(case["price"] * multiplier)
+    now = int(time.time())
+
+    ensure_user(user)
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
+        balance = int(row["bal"]) if row else 0
+        if balance < case["price"]:
+            raise HTTPException(400, f"Недостаточно ⭐. Нужно {case['price']} ⭐, баланс: {balance} ⭐.")
+        new_balance = balance - case["price"] + payout
+        con.execute("UPDATE users SET bal=? WHERE id=?", (new_balance, uid))
+        con.execute(
+            "INSERT INTO case_opens(uid,case_id,case_name,price,multiplier,payout,created_at) VALUES(?,?,?,?,?,?,?)",
+            (uid, case_id, case["name"], case["price"], multiplier, payout, now)
+        )
+    return {
+        "ok": True, "case_id": case_id, "case_name": case["name"],
+        "price": case["price"], "multiplier": multiplier,
+        "payout": payout, "net": payout - case["price"],
+        "balance": new_balance
+    }
 
 
 @app.post("/api/deposit")
