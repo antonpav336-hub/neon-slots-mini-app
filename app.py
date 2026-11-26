@@ -58,6 +58,10 @@ def init_db():
             bet INTEGER NOT NULL, payout INTEGER NOT NULL, symbols TEXT NOT NULL,
             created_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS miner(
+            uid INTEGER PRIMARY KEY, points INTEGER NOT NULL DEFAULT 0,
+            last_claim INTEGER NOT NULL DEFAULT 0, total_claims INTEGER NOT NULL DEFAULT 0
+        );
         """)
 init_db()
 
@@ -321,6 +325,42 @@ async def spin(body: Amount, request: Request):
     )
     return {"symbols":reels,"bet":bet,"multiplier":mult,"payout":payout,
             "balance":new_balance,"result":outcome}
+
+@app.get("/api/miner")
+async def miner_status(request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    now = int(time.time())
+    cooldown = 60
+    with connect() as con:
+        con.execute("INSERT OR IGNORE INTO miner(uid,points,last_claim,total_claims) VALUES(?,0,0,0)", (uid,))
+        row = con.execute("SELECT points,last_claim,total_claims FROM miner WHERE uid=?", (uid,)).fetchone()
+    remaining = max(0, cooldown - (now - int(row["last_claim"]))) if row["last_claim"] else 0
+    return {"points": int(row["points"]), "remaining": remaining,
+            "total_claims": int(row["total_claims"]), "cooldown": cooldown}
+
+
+@app.post("/api/miner/claim")
+async def miner_claim(request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    now = int(time.time())
+    cooldown = 60
+    reward = 2 + secrets.randbelow(7)
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        con.execute("INSERT OR IGNORE INTO miner(uid,points,last_claim,total_claims) VALUES(?,0,0,0)", (uid,))
+        row = con.execute("SELECT points,last_claim,total_claims FROM miner WHERE uid=?", (uid,)).fetchone()
+        remaining = cooldown - (now - int(row["last_claim"])) if row["last_claim"] else 0
+        if remaining > 0:
+            raise HTTPException(429, f"Майнер заряжается. Подожди {remaining} сек.")
+        con.execute("UPDATE miner SET points=points+?,last_claim=?,total_claims=total_claims+1 WHERE uid=?",
+                    (reward, now, uid))
+        points = int(row["points"]) + reward
+        claims = int(row["total_claims"]) + 1
+    return {"ok": True, "reward": reward, "points": points,
+            "remaining": cooldown, "total_claims": claims}
+
 
 @app.post("/api/withdraw")
 async def withdraw(body: Amount, request: Request):
