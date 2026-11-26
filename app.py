@@ -11,6 +11,13 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = os.getenv("DB_PATH", str(ROOT / "casino.db"))
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = os.getenv("ADMIN_ID", "")
+PAYMENT_SECRET = os.getenv("PAYMENT_SECRET", "")
+TELEGRAM_TEST_SERVER = os.getenv("TELEGRAM_TEST_SERVER", "1") == "1"
+
+
+def telegram_api_url(method: str) -> str:
+    suffix = "/test" if TELEGRAM_TEST_SERVER else ""
+    return f"https://api.telegram.org/bot{BOT_TOKEN}{suffix}/{method}"
 COINS_PER_STAR = int(os.getenv("COINS_PER_STAR", "1"))
 MIN_WITHDRAW = int(os.getenv("MIN_WITHDRAW", "50"))
 MAX_BET = int(os.getenv("MAX_BET", "100000"))
@@ -83,7 +90,7 @@ async def notify_admin(message: str):
         return
     try:
         async with httpx.AsyncClient(timeout=8) as client:
-            await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            await client.post(telegram_api_url("sendMessage"),
                               json={"chat_id": int(ADMIN_ID), "text": message})
     except Exception:
         pass
@@ -140,7 +147,7 @@ async def deposit(body: Amount, request: Request):
         con.execute("INSERT INTO invoices(payload,uid,stars,coins,created_at) VALUES(?,?,?,?,?)",
                     (payload, uid, stars, coins, int(time.time())))
     async with httpx.AsyncClient(timeout=12) as client:
-        response = await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendInvoice", json={
+        response = await client.post(telegram_api_url("sendInvoice"), json={
             "chat_id": uid, "title": "Монеты Neon Slots",
             "description": f"{coins} игровых монет",
             "payload": payload, "currency": "XTR",
@@ -152,6 +159,127 @@ async def deposit(body: Amount, request: Request):
             con.execute("DELETE FROM invoices WHERE payload=? AND status='pending'", (payload,))
         raise HTTPException(502, "Telegram не смог создать счёт. Сначала нажмите /start у бота.")
     return {"ok":True,"message":"Счёт отправлен в чат с ботом. Оплатите его там."}
+
+
+# ВНУТРЕННИЕ ENDPOINTS: бот обращается к единой базе сайта на Render.
+def check_internal_secret(request: Request):
+    supplied = request.headers.get("X-Internal-Secret", "")
+    if not PAYMENT_SECRET or not hmac.compare_digest(supplied, PAYMENT_SECRET):
+        raise HTTPException(403, "Недостаточно прав.")
+
+
+class InternalUser(BaseModel):
+    user_id: int
+    username: str = ""
+    first_name: str = "Игрок"
+
+
+class InternalPaymentCheck(BaseModel):
+    payload: str
+    user_id: int
+    total_amount: int
+    currency: str
+
+
+class InternalPayment(InternalPaymentCheck):
+    charge_id: str
+
+
+class InternalWithdrawalDecision(BaseModel):
+    approved: bool
+
+
+@app.post("/api/internal/user")
+async def internal_user(body: InternalUser, request: Request):
+    check_internal_secret(request)
+    user = {"id": body.user_id, "username": body.username, "first_name": body.first_name}
+    balance = ensure_user(user)
+    return {"ok": True, "balance": balance}
+
+
+@app.get("/api/internal/balance/{user_id}")
+async def internal_balance(user_id: int, request: Request):
+    check_internal_secret(request)
+    with connect() as con:
+        row = con.execute("SELECT bal FROM users WHERE id=?", (user_id,)).fetchone()
+    return {"balance": int(row["bal"]) if row else 0}
+
+
+@app.post("/api/internal/precheckout")
+async def internal_precheckout(body: InternalPaymentCheck, request: Request):
+    check_internal_secret(request)
+    if body.currency != "XTR":
+        return {"ok": False}
+    with connect() as con:
+        invoice = con.execute(
+            "SELECT uid,stars,status FROM invoices WHERE payload=?", (body.payload,)
+        ).fetchone()
+    valid = bool(
+        invoice and invoice["uid"] == body.user_id
+        and invoice["stars"] == body.total_amount
+        and invoice["status"] == "pending"
+    )
+    return {"ok": valid}
+
+
+@app.post("/api/internal/payment")
+async def internal_payment(body: InternalPayment, request: Request):
+    check_internal_secret(request)
+    if body.currency != "XTR" or not body.charge_id:
+        raise HTTPException(400, "Некорректные данные платежа.")
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        duplicate = con.execute(
+            "SELECT uid FROM payments WHERE charge_id=?", (body.charge_id,)
+        ).fetchone()
+        if duplicate:
+            row = con.execute("SELECT bal FROM users WHERE id=?", (body.user_id,)).fetchone()
+            return {"ok": True, "duplicate": True, "balance": int(row["bal"]) if row else 0}
+        invoice = con.execute(
+            "SELECT * FROM invoices WHERE payload=?", (body.payload,)
+        ).fetchone()
+        if (not invoice or invoice["uid"] != body.user_id
+                or invoice["stars"] != body.total_amount
+                or invoice["status"] != "pending"):
+            raise HTTPException(400, "Счёт не найден, уже оплачен или не совпадает сумма.")
+        con.execute(
+            "INSERT INTO payments(charge_id,uid,stars,coins,created_at) VALUES(?,?,?,?,?)",
+            (body.charge_id, body.user_id, body.total_amount, invoice["coins"], int(time.time()))
+        )
+        con.execute("UPDATE users SET bal=bal+? WHERE id=?",
+                    (invoice["coins"], body.user_id))
+        con.execute("UPDATE invoices SET status='paid' WHERE payload=?", (body.payload,))
+        row = con.execute("SELECT bal FROM users WHERE id=?", (body.user_id,)).fetchone()
+        new_balance = int(row["bal"])
+    return {"ok": True, "credited": invoice["coins"], "balance": new_balance}
+
+
+@app.get("/api/internal/withdrawals")
+async def internal_withdrawals(request: Request):
+    check_internal_secret(request)
+    with connect() as con:
+        rows = con.execute(
+            "SELECT id,uid,amount FROM withdrawals WHERE status='pending' ORDER BY id DESC LIMIT 20"
+        ).fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.post("/api/internal/withdrawals/{withdrawal_id}/resolve")
+async def internal_resolve_withdrawal(withdrawal_id: int, body: InternalWithdrawalDecision, request: Request):
+    check_internal_secret(request)
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute("SELECT * FROM withdrawals WHERE id=?", (withdrawal_id,)).fetchone()
+        if not row or row["status"] != "pending":
+            raise HTTPException(404, "Заявка не найдена или уже обработана.")
+        status = "approved" if body.approved else "rejected"
+        con.execute("UPDATE withdrawals SET status=? WHERE id=?", (status, withdrawal_id))
+        if not body.approved:
+            con.execute("UPDATE users SET bal=bal+? WHERE id=?", (row["amount"], row["uid"]))
+        balance_row = con.execute("SELECT bal FROM users WHERE id=?", (row["uid"],)).fetchone()
+        balance = int(balance_row["bal"]) if balance_row else 0
+    return {"ok": True, "status": status, "user_id": row["uid"], "amount": row["amount"], "balance": balance}
+
 
 @app.post("/api/spin")
 async def spin(body: Amount, request: Request):
