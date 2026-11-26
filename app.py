@@ -1,4 +1,5 @@
 import os, json, hmac, hashlib, time, sqlite3, secrets
+from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl
 from pathlib import Path
 import httpx
@@ -6,6 +7,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from telegram import Update
+from bot import build_application
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = os.getenv("DB_PATH", str(ROOT / "casino.db"))
@@ -23,7 +26,40 @@ MIN_WITHDRAW = int(os.getenv("MIN_WITHDRAW", "50"))
 MAX_BET = int(os.getenv("MAX_BET", "100000"))
 INIT_DATA_MAX_AGE = int(os.getenv("INIT_DATA_MAX_AGE", "86400"))
 
-app = FastAPI(title="Neon Slots Mini App")
+telegram_application = None
+WEBHOOK_PATH = "/telegram/webhook"
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip() or secrets.token_urlsafe(32)
+
+@asynccontextmanager
+async def lifespan(fastapi_app):
+    global telegram_application
+    if BOT_TOKEN:
+        telegram_application = build_application()
+        await telegram_application.initialize()
+        await telegram_application.start()
+        public_url = os.getenv("WEBHOOK_URL", "").strip() or os.getenv("RENDER_EXTERNAL_URL", "").strip()
+        if public_url:
+            webhook_url = public_url.rstrip("/") + WEBHOOK_PATH
+            await telegram_application.bot.set_webhook(
+                url=webhook_url,
+                secret_token=WEBHOOK_SECRET,
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=False,
+            )
+            print("Telegram webhook configured:", webhook_url)
+        else:
+            print("WARNING: WEBHOOK_URL/RENDER_EXTERNAL_URL is missing; webhook not configured.")
+    else:
+        print("WARNING: BOT_TOKEN is missing; Telegram bot is disabled.")
+    try:
+        yield
+    finally:
+        if telegram_application is not None:
+            await telegram_application.stop()
+            await telegram_application.shutdown()
+            telegram_application = None
+
+app = FastAPI(title="Neon Slots Mini App", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 def connect():
@@ -113,6 +149,24 @@ def ensure_user(user):
 
 def display_user(user):
     return f"{user.get('first_name','Игрок')} (@{user.get('username')})" if user.get("username") else f"{user.get('first_name','Игрок')} (ID {user['id']})"
+
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    if not hmac.compare_digest(
+        request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""),
+        WEBHOOK_SECRET,
+    ):
+        raise HTTPException(403, "Invalid webhook secret")
+    if telegram_application is None:
+        raise HTTPException(503, "Telegram bot is starting")
+    try:
+        payload = await request.json()
+        update = Update.de_json(payload, telegram_application.bot)
+        await telegram_application.process_update(update)
+    except Exception as exc:
+        print("TELEGRAM WEBHOOK ERROR:", repr(exc))
+        raise HTTPException(500, "Webhook processing failed")
+    return {"ok": True}
 
 @app.get("/")
 async def home():
