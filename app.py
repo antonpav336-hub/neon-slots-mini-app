@@ -299,9 +299,11 @@ async def internal_payment(body: InternalPayment, request: Request):
     with connect() as con:
         con.execute("BEGIN IMMEDIATE")
         duplicate = con.execute(
-            "SELECT uid FROM payments WHERE charge_id=?", (body.charge_id,)
+            "SELECT uid,stars FROM payments WHERE charge_id=?", (body.charge_id,)
         ).fetchone()
         if duplicate:
+            if duplicate["uid"] != body.user_id or duplicate["stars"] != body.total_amount:
+                raise HTTPException(409, "Идентификатор платежа уже использован.")
             row = con.execute("SELECT bal FROM users WHERE id=?", (body.user_id,)).fetchone()
             return {"ok": True, "duplicate": True, "balance": int(row["bal"]) if row else 0}
         invoice = con.execute(
