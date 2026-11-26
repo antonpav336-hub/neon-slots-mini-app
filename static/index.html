@@ -163,9 +163,65 @@ body{background:radial-gradient(ellipse at 10% 0%,#26356a55,transparent 38%),rad
 #page-profile .section-title{margin-top:23px}
 #page-profile .panel{border-radius:19px}
 @media(max-width:360px){.profile-hero{gap:9px;padding:13px}.profile-avatar{width:52px;height:52px;flex-basis:52px}.profile-identity h3{font-size:14px}.profile-level{padding:8px}}
+
+/* PRO MAX — cinematic premium interface */
+:root{--electric:#7b6cff;--ice:#75f4ff;--violet:#b66cff}
+body{background-color:#050711;background-image:radial-gradient(ellipse at 50% -8%,#45308066,transparent 44%),radial-gradient(ellipse at 0% 42%,#123c5940,transparent 38%),radial-gradient(ellipse at 100% 64%,#4a1b5630,transparent 35%)}
+body:before{opacity:.11;background-size:42px 42px}
+.wrap{max-width:580px;padding-top:18px}
+.top{margin-bottom:16px}
+.brand{display:flex;align-items:center;gap:9px;letter-spacing:2.5px}
+.brand:before{content:"N";width:29px;height:29px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(145deg,#7b6cff,#35d9ef);color:#070914;font-size:16px;font-weight:1000;box-shadow:0 0 22px #7b6cff77}
+.avatar{border:1px solid #a18aff66;box-shadow:0 0 0 4px #8c6cff12,0 0 28px #a14dff66}
+.hero-premium{position:relative;isolation:isolate;margin:0 -4px 21px;padding:12px 10px 18px;overflow:hidden;border-radius:30px;background:radial-gradient(ellipse at 50% 40%,#28245a50,transparent 54%),linear-gradient(180deg,#11162b77,transparent);border:1px solid #7e78bb22;box-shadow:inset 0 1px #ffffff0b,0 20px 60px #0003}
+.hero-premium:before{content:"";position:absolute;z-index:-1;inset:-40% -30%;background:conic-gradient(from 0deg,transparent 0 25%,#7d68ff0b 33%,transparent 42%,#45e9ff0c 55%,transparent 68%);animation:ambientSpin 24s linear infinite}
+.hero-kicker{display:flex;align-items:center;justify-content:center;gap:8px;color:#aeb9df;font-size:9px;font-weight:900;letter-spacing:3px}
+.hero-kicker i{width:6px;height:6px;border-radius:50%;background:#5ef3c0;box-shadow:0 0 12px #5ef3c0;animation:statusPulse 1.8s infinite}
+.hero-kicker span{color:#67f0d0;letter-spacing:1.5px}
+.hero-stage{height:190px;position:relative;display:grid;place-items:center;margin:0 auto 1px;max-width:340px;perspective:700px}
+.hero-core{position:relative;width:112px;height:112px;display:grid;place-items:center;border-radius:34px;transform:rotate(-10deg);background:linear-gradient(145deg,#8b72ff 0%,#37306e 42%,#102d48 100%);border:1px solid #c5b7ff99;box-shadow:0 0 24px #826cffaa,0 0 75px #6b5cff66,inset 0 2px 16px #ffffff55,inset 0 -16px 30px #06091d;animation:coreFloat 4s ease-in-out infinite}
+.hero-core:before{content:"";position:absolute;inset:9px;border-radius:27px;border:1px solid #ffffff35;box-shadow:inset 0 0 25px #ffffff14}
+.core-glyph{font-size:55px;filter:drop-shadow(0 0 15px #8af8ff99);transform:rotate(10deg);animation:glyphPulse 3s ease-in-out infinite}
+.core-glint{position:absolute;inset:0;border-radius:inherit;background:linear-gradient(120deg,transparent 25%,#ffffff55 48%,transparent 60%);transform:translateX(-130%);animation:coreShine 4s ease-in-out infinite}
+.hero-orbit{position:absolute;width:205px;height:82px;border:1px solid #8f7cff70;border-radius:50%;transform:rotate(-24deg);box-shadow:0 0 22px #7b6cff1c;animation:orbitFloat 7s ease-in-out infinite}
+.orbit-b{width:240px;height:105px;border-color:#5deaff66;transform:rotate(28deg);animation-direction:reverse;animation-duration:9s}
+.float-gem{position:absolute;color:#8df5ff;text-shadow:0 0 18px currentColor;font-size:20px;animation:gemDrift 3s ease-in-out infinite}
+.gem-a{left:17%;top:32%;color:#c09aff}.gem-b{right:17%;top:23%;font-size:15px;animation-delay:-1s}.gem-c{right:24%;bottom:16%;font-size:24px;animation-delay:-2s}
+.hero-premium h1{font-size:clamp(34px,9vw,45px);line-height:.99;letter-spacing:-2.4px;font-weight:1000;margin:0 0 11px;background:linear-gradient(100deg,#fff 12%,#c7c0ff 48%,#75f4ff 90%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:none}
+.hero-premium h1 em{font-style:normal;color:#a98aff}
+.hero-premium p{font-size:11px;color:#aab5d4;letter-spacing:.2px}
+.hero-pills{display:flex;justify-content:center;gap:7px;flex-wrap:wrap;margin-top:15px}
+.hero-pills span{font-size:8px;font-weight:900;letter-spacing:.8px;color:#c7d6ff;border:1px solid #6577ad55;background:#151e36b8;border-radius:30px;padding:7px 10px;box-shadow:inset 0 1px #ffffff0a}
+.balance{border-radius:23px;border-color:#7c75bd66;background:linear-gradient(112deg,#282253 0%,#191c3b 54%,#103c4a 100%);box-shadow:0 18px 48px #0008,0 0 35px #7764ff1c,inset 0 1px #ffffff18}
+.balance .coin{width:58px;height:58px;display:grid;place-items:center;border-radius:19px;background:linear-gradient(145deg,#453773,#1d4760);border:1px solid #9b8cff66;box-shadow:0 0 28px #8c6cff44;font-size:30px}
+.shortcut,.cashier-card,.mines-card,.profile-hero,.profile-balance{backdrop-filter:blur(12px)}
+.shortcut{position:relative;overflow:hidden;min-height:88px}
+.shortcut:after{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 30%,#ffffff0b 50%,transparent 70%);transform:translateX(-120%);transition:transform .65s}
+.shortcut:active:after{transform:translateX(120%)}
+.shortcut.primary{min-height:96px;border-color:#7768c5;background:radial-gradient(ellipse at 95% 0%,#8b60ff55,transparent 48%),linear-gradient(110deg,#292153,#172a48 72%,#123c4a);box-shadow:0 15px 34px #0007,0 0 28px #8a6cff18}
+.action,.cashier-button,.spin,.mines-actions button,.nav-tab,.bet-controls button,.mines-options button,.mine-cell{ -webkit-tap-highlight-color:transparent}
+button{cursor:pointer}
+button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
+.spin,.cashier-button,.mines-actions button{position:relative;overflow:hidden;transition:transform .18s,filter .18s,box-shadow .18s}
+.spin:before,.cashier-button:before,.mines-actions button:before{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 20%,#ffffff42 50%,transparent 75%);transform:translateX(-120%);transition:transform .65s}
+.spin:active:before,.cashier-button:active:before,.mines-actions button:active:before{transform:translateX(120%)}
+.bottom-nav{border-color:#59638c99;background:rgba(9,13,27,.88);box-shadow:0 15px 50px #000c,0 0 35px #7164ff24,inset 0 1px #ffffff15}
+.nav-tab.active{background:linear-gradient(145deg,#34366a,#1b4052);box-shadow:inset 0 0 0 1px #91a4e0,0 0 20px #65f4ff24}
+.page.active{animation:premiumPageIn .36s cubic-bezier(.2,.8,.2,1)}
+#intro{background:radial-gradient(ellipse at 50% 44%,#493078 0%,#17102f 38%,#050711 100%)}
+#intro:before{width:min(78vw,370px);height:min(78vw,370px);border-width:1px;box-shadow:0 0 85px #9d42ff33,inset 0 0 85px #9d42ff22}
+#intro:after{width:min(62vw,290px);height:min(62vw,290px)}
+.intro-mascot{font-size:100px;filter:drop-shadow(0 0 28px #a95cff)}
+.intro-title{font-size:clamp(34px,9vw,43px);letter-spacing:3px}
+.intro-sub{font-size:10px;letter-spacing:3px}
+.intro-loader{width:210px;height:4px;box-shadow:0 0 20px #8c2cff33}
+@keyframes ambientSpin{to{transform:rotate(360deg)}}@keyframes statusPulse{50%{opacity:.45;box-shadow:0 0 3px #5ef3c0}}@keyframes coreFloat{0%,100%{transform:translateY(0) rotate(-10deg)}50%{transform:translateY(-9px) rotate(-6deg)}}@keyframes glyphPulse{50%{filter:drop-shadow(0 0 24px #8af8ff)}}@keyframes coreShine{0%,55%{transform:translateX(-130%)}80%,100%{transform:translateX(130%)}}@keyframes orbitFloat{50%{transform:rotate(-18deg) scale(1.04)}}@keyframes gemDrift{50%{transform:translateY(-10px) rotate(14deg);opacity:.65}}@keyframes premiumPageIn{from{opacity:0;transform:translateY(12px) scale(.99);filter:blur(3px)}to{opacity:1;transform:none;filter:none}}
+@media(max-width:380px){.hero-stage{height:165px}.hero-core{width:96px;height:96px}.hero-orbit{width:180px;height:72px}.orbit-b{width:210px;height:90px}.hero-premium{padding-left:7px;padding-right:7px}}
+@media(prefers-reduced-motion:reduce){.hero-premium:before,.hero-core,.core-glyph,.hero-orbit,.float-gem,.hero-kicker i{animation:none!important}.page.active{animation:none}}
+
 </style></head>
 <body><div id="intro" aria-label="Загрузка NEON MINES"><div class="intro-content"><div class="intro-mascot">💣</div><div class="intro-title">NEON MINES</div><div class="intro-sub">Добро пожаловать в игру</div><div class="intro-loader"><i></i></div></div></div><main class="wrap"><header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
-<section class="page active" id="page-home"><div class="hero"><div class="eyebrow">RISK • REVEAL • CASH OUT</div><h1>NEON MINES</h1><p>Открывай безопасные клетки и забирай растущий множитель</p></div><section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">⭐</span></div></div><div class="coin">⭐</div></section><div class="home-shortcuts"><button class="shortcut primary" data-go="games"><span>💣</span><b>Играть в Минёр</b><small>Открывай клетки и забирай выигрыш</small></button><div class="shortcut-row"><button class="shortcut" data-go="deposit"><span>⭐</span><b>Пополнить</b><small>Telegram Stars</small></button><button class="shortcut" data-go="withdraw"><span>💸</span><b>Вывести</b><small>Заявка на вывод</small></button></div></div><div class="home-caption">ТВОЯ ИГРОВАЯ ЗОНА <span>NEON MINES</span></div></section><section class="page" id="page-games"><section class="mines-card">
+<section class="page active" id="page-home"><div class="hero hero-premium"><div class="hero-kicker"><i></i> THE NEON ARENA <span>• LIVE</span></div><div class="hero-stage" aria-hidden="true"><div class="hero-orbit orbit-a"></div><div class="hero-orbit orbit-b"></div><div class="hero-core"><div class="core-glyph">💎</div><div class="core-glint"></div></div><span class="float-gem gem-a">✦</span><span class="float-gem gem-b">◆</span><span class="float-gem gem-c">✧</span></div><h1>PLAY <em>BEYOND</em><br>THE RISK.</h1><p>Твоя удача. Твои правила. Забирай больше.</p><div class="hero-pills"><span>⚡ МГНОВЕННАЯ ИГРА</span><span>✦ TELEGRAM STARS</span></div></div><section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">⭐</span></div></div><div class="coin">⭐</div></section><div class="home-shortcuts"><button class="shortcut primary" data-go="games"><span>💣</span><b>Играть в Минёр</b><small>Открывай клетки и забирай выигрыш</small></button><div class="shortcut-row"><button class="shortcut" data-go="deposit"><span>⭐</span><b>Пополнить</b><small>Telegram Stars</small></button><button class="shortcut" data-go="withdraw"><span>💸</span><b>Вывести</b><small>Заявка на вывод</small></button></div></div><div class="home-caption">ТВОЯ ИГРОВАЯ ЗОНА <span>NEON MINES</span></div></section><section class="page" id="page-games"><section class="mines-card">
 <div class="slot-head"><strong>💣 MINES</strong><div style="display:flex;align-items:center;gap:10px"><button class="sound-toggle" id="soundToggle">🔊 ЗВУК: ВКЛ</button><span class="live">LIVE GAME</span></div></div>
 <div class="bet-row"><span class="bet-label">СТАВКА</span><span class="bet-value" id="betVal">10 ⭐</span></div>
 <div class="mines-options" id="betOptions"><button data-bet="10" class="selected">10</button><button data-bet="25">25</button><button data-bet="50">50</button><button data-bet="100">100</button><button data-bet="max">MAX</button></div>
