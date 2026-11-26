@@ -78,12 +78,37 @@ body{background:radial-gradient(ellipse at 10% 0%,#26356a55,transparent 38%),rad
 .mines-actions button.secondary{background:linear-gradient(100deg,#72f4ff,#75e8bd);color:#07111e}
 .mines-actions button:disabled{opacity:.45;filter:saturate(.5)}
 @media(max-width:360px){.mine-cell{font-size:20px}.mines-actions button{font-size:10px;padding:12px 5px}}
+
+/* Bottom navigation and app pages */
+.wrap{padding-bottom:calc(104px + env(safe-area-inset-bottom))}
+.page{display:none;animation:pageIn .22s ease}.page.active{display:block}
+@keyframes pageIn{from{opacity:.45;transform:translateY(7px)}to{opacity:1;transform:none}}
+.bottom-nav{position:fixed;z-index:20;left:50%;bottom:calc(10px + env(safe-area-inset-bottom));transform:translateX(-50%);width:min(540px,calc(100% - 22px));display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px 7px;background:rgba(13,18,35,.94);border:1px solid #354266;border-radius:21px;box-shadow:0 14px 42px #000b,0 0 28px #7264ff20;backdrop-filter:blur(18px)}
+.nav-tab{min-width:0;border:0;background:transparent;color:#8490b2;border-radius:14px;padding:7px 2px 6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font:700 9px Inter, sans-serif;transition:.18s}
+.nav-tab .nav-icon{font-size:19px;line-height:1.1;filter:saturate(.7)}
+.nav-tab.active{color:#eafcff;background:linear-gradient(145deg,#26345a,#20203f);box-shadow:inset 0 0 0 1px #6574ad,0 0 18px #65f4ff19}
+.nav-tab.active .nav-icon{filter:drop-shadow(0 0 7px #65f4ff)}
+.home-shortcuts{display:grid;gap:10px;margin-top:18px}
+.shortcut{width:100%;text-align:left;color:#f7f8ff;border:1px solid #354266;border-radius:18px;padding:15px;background:linear-gradient(145deg,#1b2542,#10172b);display:grid;grid-template-columns:35px 1fr;column-gap:10px;align-items:center}
+.shortcut>span{grid-row:span 2;font-size:25px}.shortcut b{font-size:12px}.shortcut small{font-size:10px;color:#9ba7c9;margin-top:4px}
+.shortcut.primary{background:linear-gradient(110deg,#27204f,#172b49 70%,#123a4a);border-color:#5867a0;box-shadow:0 10px 28px #0005}
+.shortcut-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.home-caption{margin:25px 3px 8px;color:#7f8bab;font-size:9px;font-weight:800;letter-spacing:1.7px;display:flex;justify-content:space-between}.home-caption span{color:#65f4ff}
+.page-heading{margin:18px 2px 20px}.page-heading h2{font-size:30px;letter-spacing:-1px;margin:8px 0}.page-heading p{font-size:12px;color:#9ba7c9;margin:0}
+.cashier-card{border:1px solid #394773;border-radius:25px;padding:25px 20px;text-align:center;background:radial-gradient(circle at 50% 0%,#6947b94a,transparent 48%),linear-gradient(145deg,#1b2542,#101629);box-shadow:0 18px 42px #0007}
+.withdraw-card{background:radial-gradient(circle at 50% 0%,#1c8a9b42,transparent 48%),linear-gradient(145deg,#1b2542,#101629)}
+.cashier-icon{width:76px;height:76px;border-radius:25px;margin:0 auto 16px;display:grid;place-items:center;font-size:38px;background:linear-gradient(145deg,#332a65,#183e58);box-shadow:0 0 32px #8c62ff45}
+.cashier-card h3{font-size:18px;margin:0 0 9px}.cashier-card p{font-size:11px;line-height:1.65;color:#a5afce;margin:0 auto 20px;max-width:290px}
+.cashier-button{width:100%;border:0;border-radius:15px;padding:16px;background:linear-gradient(100deg,#ff4fae,#a34dff 55%,#4b8dff);color:#fff;font-size:12px;font-weight:900;letter-spacing:.8px;box-shadow:0 10px 28px #a34dff45}
+.withdraw-card .cashier-button{background:linear-gradient(100deg,#65f4ff,#67dcb4);color:#081522;box-shadow:0 10px 28px #65f4ff25}
+.cashier-note{font-size:9px;color:#8490b2;margin-top:14px}
+@media(max-width:360px){.nav-tab{font-size:8px}.nav-tab .nav-icon{font-size:17px}.bottom-nav{gap:1px;padding:7px 5px}}
+
 </style></head>
-<body><main class="wrap">
-<header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
+<body><main class="wrap"><header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
 <section class="hero"><div class="eyebrow">RISK • REVEAL • CASH OUT</div><h1>NEON MINES</h1><p>Открывай безопасные клетки и забирай растущий множитель</p></section>
 <section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">монет</span></div></div><div class="coin">🪙</div></section>
-<section class="mines-card">
+<section class="page active" id="page-home"><div class="hero"><div class="eyebrow">RISK • REVEAL • CASH OUT</div><h1>NEON MINES</h1><p>Открывай безопасные клетки и забирай растущий множитель</p></div><section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">монет</span></div></div><div class="coin">🪙</div></section><div class="home-shortcuts"><button class="shortcut primary" data-go="games"><span>💣</span><b>Играть в Минёр</b><small>Открывай клетки и забирай выигрыш</small></button><div class="shortcut-row"><button class="shortcut" data-go="deposit"><span>⭐</span><b>Пополнить</b><small>Telegram Stars</small></button><button class="shortcut" data-go="withdraw"><span>💸</span><b>Вывести</b><small>Заявка на вывод</small></button></div></div><div class="home-caption">ТВОЯ ИГРОВАЯ ЗОНА <span>NEON MINES</span></div></section><section class="page" id="page-games"><section class="mines-card">
 <div class="slot-head"><strong>💣 MINES</strong><div style="display:flex;align-items:center;gap:10px"><button class="sound-toggle" id="soundToggle">🔊 ЗВУК: ВКЛ</button><span class="live">LIVE GAME</span></div></div>
 <div class="bet-row"><span class="bet-label">СТАВКА</span><span class="bet-value" id="betVal">10 монет</span></div>
 <div class="mines-options" id="betOptions"><button data-bet="10" class="selected">10</button><button data-bet="25">25</button><button data-bet="50">50</button><button data-bet="100">100</button><button data-bet="max">MAX</button></div>
@@ -95,19 +120,23 @@ body{background:radial-gradient(ellipse at 10% 0%,#26356a55,transparent 38%),rad
 </div>
 <div class="mines-actions"><button id="minesStart">НАЧАТЬ • 10 🪙</button><button id="minesCashout" class="secondary" disabled>ЗАБРАТЬ ВЫИГРЫШ</button></div>
 <div class="result" id="minesResult">Выбери ставку и количество мин</div></section>
-<div class="section-title">КАССА <small>Stars • заявки</small></div>
-<div class="actions"><button class="action" id="deposit"><span class="ico">⭐</span><b>Пополнить</b><small>Оплата Telegram Stars</small></button><button class="action" id="withdraw"><span class="ico">💸</span><b>Вывести</b><small>Заявка администратору</small></button></div>
-<div class="section-title">МОЯ СТАТИСТИКА <small>Твои результаты</small></div><section class="panel" id="stats"><div class="muted" style="font-size:11px">Загрузка статистики…</div></section>
+</section><section class="page" id="page-deposit"><div class="page-heading"><div class="eyebrow">NEON CASHIER</div><h2>Пополнение</h2><p>Пополняй игровой баланс через Telegram Stars.</p></div><div class="cashier-card"><div class="cashier-icon">⭐</div><h3>Пополни баланс</h3><p>Выбери сумму Stars. После подтверждения оплаты монеты поступят на игровой баланс.</p><button class="cashier-button" id="deposit">ПОПОЛНИТЬ БАЛАНС</button><div class="cashier-note">Безопасная оплата через Telegram</div></div></section><section class="page" id="page-withdraw"><div class="page-heading"><div class="eyebrow">NEON CASHIER</div><h2>Вывод</h2><p>Создай заявку на вывод доступных игровых монет.</p></div><div class="cashier-card withdraw-card"><div class="cashier-icon">💸</div><h3>Вывод средств</h3><p>Укажи количество монет. Заявка будет отправлена администратору на проверку.</p><button class="cashier-button" id="withdraw">СОЗДАТЬ ЗАЯВКУ</button><div class="cashier-note">Статус заявки можно будет отслеживать в профиле.</div></div></section><section class="page" id="page-profile"><div class="section-title">МОЯ СТАТИСТИКА <small>Твои результаты</small></div><section class="panel" id="stats"><div class="muted" style="font-size:11px">Загрузка статистики…</div></section>
 <div class="section-title">🏆 ТАБЛИЦА ЛИДЕРОВ <small>Топ игроков</small></div><section class="panel" id="leaderboard"><div class="muted" style="font-size:11px">Загрузка рейтинга…</div></section>
 <div class="section-title">ИСТОРИЯ ИГР <small>Последние раунды</small></div><section class="panel" id="history"><div class="muted" style="font-size:11px">Загрузка истории…</div></section>
 <div class="section-title">ПРОФИЛЬ <small id="username">Telegram</small></div><section class="panel" id="profile"><div class="muted" style="font-size:11px">Загрузка профиля…</div></section>
 <div class="footer">NEON MINES • Игровой тестовый проект. Играйте ответственно.<br>Покупки и заявки доступны только после проверки Telegram.</div>
-</main>
+</section></main>
+<nav class="bottom-nav" aria-label="Основная навигация"><button class="nav-tab active" data-tab="home"><span class="nav-icon">⌂</span><span>Главная</span></button><button class="nav-tab" data-tab="games"><span class="nav-icon">💣</span><span>Игры</span></button><button class="nav-tab" data-tab="deposit"><span class="nav-icon">⭐</span><span>Пополнить</span></button><button class="nav-tab" data-tab="withdraw"><span class="nav-icon">↗</span><span>Вывести</span></button><button class="nav-tab" data-tab="profile"><span class="nav-icon">◉</span><span>Профиль</span></button></nav>
 <div class="modal" id="modal"><div class="sheet"><h3 id="modalTitle">Пополнение</h3><p id="modalDesc">Укажи сумму.</p><input id="amount" type="number" min="1" value="50"><button id="confirm">Продолжить</button><button class="cancel" id="cancel">Отмена</button></div></div><div class="toast" id="toast"></div>
 <script>
 const tg=window.Telegram?.WebApp; if(tg){tg.ready();tg.expand();tg.setHeaderColor('#090b16');tg.setBackgroundColor('#090b16')}
 const initData=tg?.initData||'';let state={balance:0,bet:10,mode:'deposit',busy:false};
 const $=id=>document.getElementById(id);
+
+function showPage(name){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.nav-tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));window.scrollTo({top:0,behavior:'smooth'});}
+document.querySelectorAll('.nav-tab').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.tab)));
+document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.go)));
+
 function toast(s){$('toast').textContent=s;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2800)}
 async function api(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Telegram-Init-Data':initData},body:body?JSON.stringify(body):undefined});let d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.detail||'Ошибка сервера');return d}
 function setBalance(n){state.balance=n;$('balance').innerHTML=n.toLocaleString('ru-RU')+' <span style="font-size:12px;color:#b9bbd2">монет</span>';$('avatar').textContent=(window.userName||'N').slice(0,1).toUpperCase()}
