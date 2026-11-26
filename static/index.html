@@ -314,9 +314,44 @@ button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
 .case-odds-row b{color:#fff}.case-odds-row.jackpot,.case-odds-row.jackpot b{color:#ffd978}
 .case-odds p{margin:10px 0 0;font-size:8px;line-height:1.5;color:#8290b0}
 @media(max-width:350px){.case-card{padding-left:8px;padding-right:8px}.case-art{height:68px;font-size:42px}.case-card h3{font-size:12px}}
+
+/* GAME MODE SWITCH */
+.game-switch{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:6px;margin:12px 0 17px;border:1px solid #343f68;border-radius:17px;background:#0b1122;box-shadow:inset 0 1px #ffffff08}
+.game-switch-btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:47px;border:1px solid transparent;border-radius:12px;background:transparent;color:#8795b8;font:900 11px Inter,sans-serif;letter-spacing:1px;transition:background .22s,border-color .22s,color .22s,box-shadow .22s}
+.game-switch-btn span{font-size:17px}
+.game-switch-btn.active{color:#f4fbff;border-color:#7181c7;background:linear-gradient(120deg,#35316d,#1b4054);box-shadow:0 5px 18px #7665ff30,inset 0 1px #ffffff20}
+.game-panel{display:none}
+.game-panel.active{display:block;animation:gamePanelIn .24s ease-out both}
+@keyframes gamePanelIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+/* CS-style case roulette reveal */
+.case-reel{height:112px;position:relative;overflow:hidden;border:1px solid #53628e;border-radius:15px;background:linear-gradient(180deg,#080d1c,#141d36 48%,#080d1c);box-shadow:inset 0 0 26px #000b,0 8px 22px #0005}
+.case-reel:before,.case-reel:after{content:"";position:absolute;z-index:2;top:0;bottom:0;width:35px;pointer-events:none}
+.case-reel:before{left:0;background:linear-gradient(90deg,#080d1c,transparent)}
+.case-reel:after{right:0;background:linear-gradient(270deg,#080d1c,transparent)}
+.case-reel-track{position:absolute;left:0;top:0;height:100%;display:flex;align-items:center;gap:8px;padding:0 8px;transform:translate3d(0,0,0);will-change:transform}
+.case-reel-item{width:72px;height:82px;flex:0 0 72px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid #435178;border-radius:11px;background:linear-gradient(150deg,#263354,#111a30);box-shadow:inset 0 0 15px #0005}
+.case-reel-item i{font-style:normal;font-size:30px;line-height:1;filter:drop-shadow(0 0 8px #8d8cff55)}
+.case-reel-item small{font-size:7px;font-weight:900;letter-spacing:.5px;color:#aebbdc}
+.case-reel-item.tier-low{border-color:#52768c;background:linear-gradient(150deg,#1d3d50,#111a30)}
+.case-reel-item.tier-mid{border-color:#7659a8;background:linear-gradient(150deg,#392b61,#111a30)}
+.case-reel-item.tier-high{border-color:#b08a4b;background:linear-gradient(150deg,#594323,#1c1a2c);box-shadow:0 0 18px #ffd16622}
+.case-reel-marker{position:absolute;z-index:4;left:50%;top:0;bottom:0;width:2px;transform:translateX(-50%);background:linear-gradient(180deg,#fff4a6,#ffd166,#fff4a6);box-shadow:0 0 10px #ffd166,0 0 22px #ffd16699;pointer-events:none}
+.case-reel-marker:before,.case-reel-marker:after{content:"";position:absolute;left:50%;transform:translateX(-50%);border-left:7px solid transparent;border-right:7px solid transparent}
+.case-reel-marker:before{top:0;border-top:9px solid #ffe28a}
+.case-reel-marker:after{bottom:0;border-bottom:9px solid #ffe28a}
+.case-opening.spinning .case-big-icon{animation:caseShake .28s ease-in-out infinite}
+.case-opening.revealing .case-aura{animation:casePulse .65s ease-in-out infinite alternate}
+.case-opening.revealing .case-big-icon{animation:caseWin .55s cubic-bezier(.2,1.5,.4,1)}
+.case-opening.revealing .case-reel-marker{filter:brightness(1.5)}
+.case-result.jackpot{animation:jackpotReveal .75s cubic-bezier(.15,1.4,.35,1);text-shadow:0 0 12px #ffd978,0 0 30px #ffb52b99}
+@keyframes jackpotReveal{0%{opacity:0;transform:scale(.55)}55%{opacity:1;transform:scale(1.18)}100%{transform:scale(1)}}
+@media(max-width:380px){.case-reel{height:102px}.case-reel-item{width:64px;flex-basis:64px;height:76px}.case-reel-item i{font-size:27px}}
+@media(prefers-reduced-motion:reduce){.game-panel.active{animation:none}.case-reel-track{transition:none!important}}
 </style></head>
 <body><div id="intro" aria-label="Загрузка NEON MINES"><div class="intro-content"><div class="intro-mascot">💣</div><div class="intro-title">NEON MINES</div><div class="intro-sub">Добро пожаловать в игру</div><div class="intro-loader"><i></i></div></div></div><main class="wrap"><header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
 <section class="page active" id="page-home"><div class="hero hero-premium"><div class="hero-kicker"><i></i> THE NEON ARENA <span>• LIVE</span></div><div class="hero-stage" aria-hidden="true"><div class="hero-orbit orbit-a"></div><div class="hero-orbit orbit-b"></div><div class="hero-core"><div class="core-glyph">💎</div><div class="core-glint"></div></div><span class="float-gem gem-a">✦</span><span class="float-gem gem-b">◆</span><span class="float-gem gem-c">✧</span></div><h1>PLAY <em>BEYOND</em><br>THE RISK.</h1><p>Твоя удача. Твои правила. Забирай больше.</p><div class="hero-pills"><span>⚡ МГНОВЕННАЯ ИГРА</span><span>✦ TELEGRAM STARS</span></div></div><section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">⭐</span></div></div><div class="coin">⭐</div></section><div class="home-shortcuts"><button class="shortcut primary" data-go="games"><span>💣</span><b>Играть в Минёр</b><small>Открывай клетки и забирай выигрыш</small></button><div class="shortcut-row"><button class="shortcut" data-go="deposit"><span>⭐</span><b>Пополнить</b><small>Telegram Stars</small></button><button class="shortcut" data-go="withdraw"><span>💸</span><b>Вывести</b><small>Заявка на вывод</small></button></div></div><div class="home-caption">ТВОЯ ИГРОВАЯ ЗОНА <span>NEON MINES</span></div></section><section class="page" id="page-games">
+<div class="game-switch" role="tablist" aria-label="Выбор игры"><button class="game-switch-btn active" data-game-tab="cases" role="tab" aria-selected="true"><span>🎁</span>КЕЙСЫ</button><button class="game-switch-btn" data-game-tab="mines" role="tab" aria-selected="false"><span>💣</span>МИНЫ</button></div>
+<div class="game-panel active" id="game-cases" data-game-panel="cases">
 <section class="cases-hero">
   <div class="cases-eyebrow">✦ NEON DROP SYSTEM</div>
   <h2>NEON <span>CASES</span></h2>
@@ -334,7 +369,7 @@ button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
 <section class="case-opening" id="caseOpening" hidden>
   <div class="case-opening-top"><span id="caseOpeningName">NEON CASE</span><span class="case-live-dot">● DROP IN PROGRESS</span></div>
   <div class="case-reveal-scene" id="caseRevealScene"><div class="case-aura"></div><div class="case-big-icon" id="caseBigIcon">📦</div><div class="case-sparkles">✦　✧　✦</div></div>
-  <div class="case-reel" id="caseReel"><div class="case-reel-track" id="caseReelTrack"><span>⭐</span><span>💎</span><span>✨</span><span>⭐</span><span>🌟</span><span>💠</span><span>⭐</span><span>💎</span><span>✨</span><span>🌟</span></div></div>
+  <div class="case-reel" id="caseReel"><div class="case-reel-marker"></div><div class="case-reel-track" id="caseReelTrack"></div></div>
   <div class="case-result" id="caseResult">Подготавливаем открытие…</div>
   <button class="case-again" id="caseAgain" hidden>ОТКРЫТЬ ЕЩЁ</button>
 </section>
@@ -343,6 +378,7 @@ button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
   <p>Результат определяется на сервере. Анимация показывает уже рассчитанный результат.</p>
 </div>
 <div class="section-title">ИСТОРИЯ ОТКРЫТИЙ <small>Твои последние дропы</small></div><section class="panel" id="caseHistory"><div class="muted" style="font-size:11px">Загрузка истории…</div></section>
+<div class="game-panel" id="game-mines" data-game-panel="mines">
 <section class="mines-card">
 <div class="slot-head"><strong>💣 MINES</strong><div style="display:flex;align-items:center;gap:10px"><button class="sound-toggle" id="soundToggle">🔊 ЗВУК: ВКЛ</button><span class="live">LIVE GAME</span></div></div>
 <div class="bet-row"><span class="bet-label">СТАВКА</span><span class="bet-value" id="betVal">10 ⭐</span></div>
@@ -366,6 +402,8 @@ button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
 </div>
 <div class="mines-actions"><button id="minesStart">НАЧАТЬ • 10 ⭐</button><button id="minesCashout" class="secondary" disabled>ЗАБРАТЬ ВЫИГРЫШ</button></div>
 <div class="result" id="minesResult">Выбери ставку и количество мин</div></section>
+</div>
+</div>
 </section><section class="page" id="page-deposit"><div class="page-heading"><div class="eyebrow">NEON CASHIER</div><h2>Пополнение</h2><p>Пополняй игровой баланс через Telegram Stars.</p></div><div class="cashier-card neon-deposit"><div class="cashier-icon">⭐</div><div class="cashier-tag">INSTANT TOP UP</div><h3>Пополнение баланса</h3><p>Выбери сумму Telegram Stars. Оплата проходит внутри Telegram, а ⭐ы начисляются после подтверждения.</p><div class="cashier-benefits"><span>⚡ Быстро</span><span>🔒 Защищённо</span><span>⭐ Telegram Stars</span></div><button class="cashier-button" id="deposit">ВЫБРАТЬ СУММУ <span>→</span></button><div class="cashier-note">Текущий баланс: <b id="depositBalance">— ⭐</b></div></div><div class="cashier-info"><span>💡</span><div><b>Как это работает?</b><small>Нажми кнопку, укажи сумму и оплати счёт в чате с ботом.</small></div></div></section><section class="page" id="page-withdraw"><div class="page-heading"><div class="eyebrow">NEON CASHIER</div><h2>Вывод</h2><p>Создай заявку на вывод доступных игровых ⭐.</p></div><div class="cashier-card withdraw-card"><div class="cashier-icon">💸</div><div class="cashier-tag">PLAYER WITHDRAWAL</div><h3>Вывод ⭐</h3><p>Создай заявку на вывод доступного баланса. Каждая заявка проходит проверку администратора.</p><div class="withdraw-available"><span>ДОСТУПНО К ВЫВОДУ</span><b id="withdrawBalance">— ⭐</b></div><button class="cashier-button" id="withdraw">СОЗДАТЬ ЗАЯВКУ <span>→</span></button><div class="cashier-note">Не отправляй повторные заявки, пока предыдущая обрабатывается.</div></div><div class="cashier-info"><span>🛡️</span><div><b>Проверка заявки</b><small>После отправки администратор проверит запрос и обновит его статус.</small></div></div></section><section class="page" id="page-profile"><div class="page-heading profile-heading"><div class="eyebrow">NEON IDENTITY</div><h2>Мой профиль</h2><p>Твой игровой статус и достижения.</p></div><section class="profile-hero"><div class="profile-avatar" id="profileAvatar">N</div><div class="profile-identity"><div class="profile-kicker">PLAYER ACCOUNT</div><h3 id="profileName">Игрок NEON</h3><p id="profileHandle">Telegram account</p></div><div class="profile-level"><span>УРОВЕНЬ</span><b id="profileLevel">01</b></div></section><section class="profile-balance"><div><small>ДОСТУПНЫЙ БАЛАНС</small><b id="profileBalance">— ⭐</b></div><span>◆</span></section><section class="xp-card"><div class="xp-head"><span>⚡ ПРОГРЕСС УРОВНЯ</span><b id="xpLabel">0 / 200 XP</b></div><div class="xp-track"><i id="xpFill"></i></div><div class="xp-foot"><span id="xpHint">До следующего уровня</span><b id="xpNext">200 XP</b></div></section><div class="section-title">ДОСТИЖЕНИЯ <small>Твои milestones</small></div><section class="achievement-grid" id="achievements"><div class="achievement locked">🔒<b>Первый шаг</b><small>Сыграй первую игру</small></div><div class="achievement locked">🔒<b>Серия побед</b><small>Одержи 5 побед</small></div><div class="achievement locked">🔒<b>Опытный игрок</b><small>Сыграй 10 игр</small></div></section><div class="section-title">МОЯ СТАТИСТИКА <small>Твои результаты</small></div><section class="panel" id="stats"><div class="muted" style="font-size:11px">Загрузка статистики…</div></section>
 <div class="section-title">🏆 ТАБЛИЦА ЛИДЕРОВ <small>Топ игроков</small></div><section class="panel" id="leaderboard"><div class="muted" style="font-size:11px">Загрузка рейтинга…</div></section>
 <div class="section-title">ИСТОРИЯ ИГР <small>Последние раунды</small></div><section class="panel" id="history"><div class="muted" style="font-size:11px">Загрузка истории…</div></section>
@@ -418,19 +456,50 @@ const CASES={starter:{name:'STARTER',price:50,icon:'📦'},neon:{name:'NEON',pri
 let caseBusy=false,caseSelected=null;
 const caseWait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function loadCaseHistory(){try{const d=await api('/api/cases/history');$('caseHistory').innerHTML=d.items.length?d.items.map(x=>'<div class="history-item"><span>🎁 '+esc(x.case_name)+' <span class="muted">• '+Number(x.price).toLocaleString('ru-RU')+' ⭐</span></span><span class="'+(x.payout>=x.price?'positive':'negative')+'">'+(x.payout?'+':'')+Number(x.payout).toLocaleString('ru-RU')+' ⭐</span></div>').join(''):'<div class="muted" style="font-size:11px">Пока нет открытых кейсов</div>'}catch(e){$('caseHistory').innerHTML='<div class="muted" style="font-size:11px">История временно недоступна.</div>'}}
+function caseReward(outcome){
+ if(outcome.multiplier>=5)return {icon:'🌟',label:'JACKPOT',tier:'tier-high'};
+ if(outcome.multiplier>=1.5)return {icon:'💎',label:'EPIC',tier:'tier-mid'};
+ if(outcome.multiplier>=1)return {icon:'⭐',label:'DROP',tier:'tier-mid'};
+ if(outcome.multiplier>=.8)return {icon:'💠',label:'DROP',tier:'tier-low'};
+ if(outcome.multiplier>0)return {icon:'🪙',label:'DROP',tier:'tier-low'};
+ return {icon:'🌫️',label:'EMPTY',tier:'tier-low'};
+}
+async function playCaseRoulette(outcome){
+ const reward=caseReward(outcome),track=$('caseReelTrack'),viewport=$('caseReel');
+ const items=Array.from({length:47},(_,i)=>i===39?reward:({icon:['⭐','💎','✨','💠','🪙','🔷'][Math.floor(Math.random()*6)],label:'DROP',tier:['tier-low','tier-mid'][Math.floor(Math.random()*2)]}));
+ track.innerHTML=items.map(x=>'<div class="case-reel-item '+x.tier+'"><i>'+x.icon+'</i><small>'+x.label+'</small></div>').join('');
+ track.style.transition='none';track.style.transform='translate3d(0,0,0)';
+ await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ const tile=items.length?track.querySelector('.case-reel-item'):null;
+ const tileWidth=tile.getBoundingClientRect().width+8;
+ const target=Math.max(0,39*tileWidth+tileWidth/2-viewport.clientWidth/2);
+ track.style.transition='transform 4.7s cubic-bezier(.10,.78,.12,1)';
+ track.style.transform='translate3d(-'+target+'px,0,0)';
+ await caseWait(4800);
+ return reward;
+}
+document.querySelectorAll('[data-game-tab]').forEach(btn=>btn.addEventListener('click',()=>{
+ const name=btn.dataset.gameTab;
+ document.querySelectorAll('[data-game-tab]').forEach(b=>{const active=b===btn;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
+ document.querySelectorAll('[data-game-panel]').forEach(panel=>panel.classList.toggle('active',panel.dataset.gamePanel===name));
+}));
 document.querySelectorAll('[data-case]').forEach(btn=>btn.addEventListener('click',async()=>{
  if(caseBusy)return;const id=btn.dataset.case,config=CASES[id];if(!config)return;
  if(state.balance<config.price){toast('Недостаточно ⭐ для этого кейса.');return}
  caseBusy=true;caseSelected=id;document.querySelectorAll('[data-case]').forEach(b=>b.disabled=true);
- $('caseOpening').hidden=false;$('caseOpening').classList.add('spinning');$('caseOpeningName').textContent=config.name+' CASE';$('caseBigIcon').textContent=config.icon;$('caseResult').className='case-result';$('caseResult').textContent='Кейс открывается…';$('caseAgain').hidden=true;
+ $('caseOpening').hidden=false;$('caseOpening').classList.add('spinning');$('caseOpening').classList.remove('revealing');
+ $('caseOpeningName').textContent=config.name+' CASE';$('caseBigIcon').textContent=config.icon;
+ $('caseResult').className='case-result';$('caseResult').textContent='Сервер рассчитывает дроп…';$('caseAgain').hidden=true;
+ $('caseReelTrack').innerHTML='';$('caseReelTrack').style.transition='none';$('caseReelTrack').style.transform='translate3d(0,0,0)';
  $('caseOpening').scrollIntoView({behavior:'smooth',block:'center'});
  let outcome=null,error=null;
- try{[outcome]=await Promise.all([api('/api/cases/open',{case_id:id}),caseWait(2500)])}catch(e){error=e;await caseWait(900)}
- $('caseOpening').classList.remove('spinning');
- if(error){$('caseResult').textContent=error.message;caseBusy=false;document.querySelectorAll('[data-case]').forEach(b=>b.disabled=false);return}
+ try{outcome=await api('/api/cases/open',{case_id:id})}catch(e){error=e}
+ if(error){$('caseOpening').classList.remove('spinning');$('caseResult').textContent=error.message;caseBusy=false;document.querySelectorAll('[data-case]').forEach(b=>b.disabled=false);return}
  setBalance(outcome.balance);
+ const reward=await playCaseRoulette(outcome);
+ $('caseOpening').classList.remove('spinning');$('caseOpening').classList.add('revealing');
+ $('caseBigIcon').textContent=reward.icon;
  const won=outcome.payout>0,net=outcome.net;
- $('caseBigIcon').textContent=outcome.multiplier>=5?'🌟':outcome.multiplier>=1.5?'💎':config.icon;
  $('caseResult').className='case-result '+(outcome.multiplier>=5?'jackpot':won?'win':'');
  $('caseResult').innerHTML=outcome.multiplier>=5?'🏆 JACKPOT! +'+outcome.payout.toLocaleString('ru-RU')+' ⭐':won?'ВЫПАЛО '+outcome.payout.toLocaleString('ru-RU')+' ⭐':'В ЭТОТ РАЗ БЕЗ ВЫПЛАТЫ';
  $('caseResult').innerHTML+='<div style="margin-top:5px;font-size:9px;color:#9aa8c8">Множитель ×'+String(outcome.multiplier).replace('.',',')+' · '+(net>=0?'плюс ':'результат ')+((net>0?'+':'')+net.toLocaleString('ru-RU'))+' ⭐</div>';
@@ -438,7 +507,7 @@ document.querySelectorAll('[data-case]').forEach(btn=>btn.addEventListener('clic
  caseBusy=false;document.querySelectorAll('[data-case]').forEach(b=>b.disabled=false);
 }));
 function refreshCaseBalanceHint(){/* balance is already updated from the trusted server response */}
-$('caseAgain').onclick=()=>{$('caseOpening').hidden=true;$('caseOpening').scrollIntoView({behavior:'smooth',block:'nearest'})};
+$('caseAgain').onclick=()=>{$('caseOpening').hidden=true;$('caseOpening').classList.remove('revealing');$('caseOpening').scrollIntoView({behavior:'smooth',block:'nearest'})};
 refresh();
 window.addEventListener('load',()=>{setTimeout(()=>document.getElementById('intro')?.classList.add('hide'),1900)});
 </script></body></html>
