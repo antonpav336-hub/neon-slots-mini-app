@@ -17,7 +17,7 @@ def internal_headers():
     return {"X-Internal-Secret": PAYMENT_SECRET}
 
 async def api_get(path):
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         response = await client.get(API_URL + path, headers=internal_headers())
         response.raise_for_status()
         return response.json()
@@ -70,17 +70,21 @@ async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.pre_checkout_query
+
+    # Telegram requires an answer within about 10 seconds.
+    # Do not wait for the Render web service here: a free web service may
+    # be waking from sleep. The successful-payment handler verifies the
+    # payload, user, amount and currency against the server-side invoice
+    # before crediting the balance.
     try:
-        result = await api_post("/api/internal/precheckout", {
-            "payload": query.invoice_payload,
-            "user_id": query.from_user.id,
-            "total_amount": query.total_amount,
-            "currency": query.currency
-        })
-        valid = bool(result.get("ok"))
-    except Exception:
-        valid = False
-    await query.answer(ok=valid, error_message=None if valid else "Счёт недействителен или сервер временно недоступен.")
+        await query.answer(ok=True)
+        print(
+            "PRECHECKOUT APPROVED",
+            "user=", query.from_user.id,
+            "payload=", query.invoice_payload
+        )
+    except Exception as exc:
+        print("PRECHECKOUT ANSWER ERROR:", repr(exc))
 
 async def paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payment = update.message.successful_payment
