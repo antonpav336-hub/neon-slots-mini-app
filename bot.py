@@ -22,8 +22,8 @@ async def api_get(path):
         response.raise_for_status()
         return response.json()
 
-async def api_post(path, data):
-    async with httpx.AsyncClient(timeout=20) as client:
+async def api_post(path, data, timeout=20):
+    async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(API_URL + path, json=data, headers=internal_headers())
         response.raise_for_status()
         return response.json()
@@ -71,20 +71,35 @@ async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.pre_checkout_query
 
-    # Telegram requires an answer within about 10 seconds.
-    # Do not wait for the Render web service here: a free web service may
-    # be waking from sleep. The successful-payment handler verifies the
-    # payload, user, amount and currency against the server-side invoice
-    # before crediting the balance.
+    # Verify invoice ownership, amount, currency and pending status before
+    # allowing Telegram to collect Stars. Keep this request short because
+    # Telegram expects a pre-checkout answer within about 10 seconds.
     try:
-        await query.answer(ok=True)
+        result = await api_post("/api/internal/precheckout", {
+            "payload": query.invoice_payload,
+            "user_id": query.from_user.id,
+            "total_amount": query.total_amount,
+            "currency": query.currency
+        }, timeout=4)
+        valid = bool(result.get("ok"))
+        await query.answer(
+            ok=valid,
+            error_message=None if valid else "Счёт недействителен или уже оплачен. Создай новый счёт."
+        )
         print(
-            "PRECHECKOUT APPROVED",
+            "PRECHECKOUT APPROVED" if valid else "PRECHECKOUT REJECTED",
             "user=", query.from_user.id,
             "payload=", query.invoice_payload
         )
     except Exception as exc:
-        print("PRECHECKOUT ANSWER ERROR:", repr(exc))
+        print("PRECHECKOUT VERIFICATION ERROR:", repr(exc))
+        try:
+            await query.answer(
+                ok=False,
+                error_message="Не удалось проверить счёт. Попробуй создать новый."
+            )
+        except Exception as answer_exc:
+            print("PRECHECKOUT ANSWER ERROR:", repr(answer_exc))
 
 async def paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payment = update.message.successful_payment
