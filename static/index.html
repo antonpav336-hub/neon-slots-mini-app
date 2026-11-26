@@ -107,22 +107,5 @@ $('minesCashout').onclick=async()=>{if(!minesState.active||state.busy)return;sta
 function openModal(mode){state.mode=mode;$('modalTitle').textContent=mode==='deposit'?'Пополнить баланс ⭐':'Заявка на вывод 💸';$('modalDesc').textContent=mode==='deposit'?'Укажи количество Telegram Stars. Монеты будут начислены после успешной оплаты.':'Укажи количество монет. Сумма будет временно зарезервирована до решения администратора.';$('amount').value=mode==='deposit'?50:Math.min(50,state.balance);$('amount').min=mode==='deposit'?1:50;$('modal').classList.add('show')}
 $('deposit').onclick=()=>openModal('deposit');$('withdraw').onclick=()=>openModal('withdraw');$('cancel').onclick=()=>$('modal').classList.remove('show');
 $('confirm').onclick=async()=>{const amount=Number($('amount').value);if(!Number.isInteger(amount)||amount<1){toast('Введи корректную сумму');return}try{const d=await api(state.mode==='deposit'?'/api/deposit':'/api/withdraw',{amount});$('modal').classList.remove('show');toast(d.message||'Готово');if(state.mode==='withdraw'){setBalance(d.balance);refresh()}else if(tg){tg.showAlert('Счёт отправлен в чат с ботом. Оплати его там, затем вернись в приложение.')}}catch(e){toast(e.message)}};
-let minerCountdown=null;
-function renderMiner(d){
-  $('minerPoints').textContent=Number(d.points||0).toLocaleString('ru-RU')+' ✦';
-  const btn=$('minerClaim');let left=Number(d.remaining||0);
-  if(minerCountdown)clearInterval(minerCountdown);
-  const paint=()=>{ $('minerTimer').textContent=left>0?left+'с':'ГОТОВ';btn.disabled=left>0;btn.textContent=left>0?'⏳ МАЙНЕР ЗАРЯЖАЕТСЯ':'⚡ ЗАПУСТИТЬ МАЙНИНГ';};
-  paint();
-  if(left>0)minerCountdown=setInterval(()=>{left--;paint();if(left<=0)clearInterval(minerCountdown)},1000);
-}
-async function loadMiner(){if(!initData)return;try{renderMiner(await api('/api/miner'))}catch(e){toast(e.message)}}
-$('minerClaim').onclick=async()=>{
-  if(state.minerBusy)return;
-  state.minerBusy=true;$('minerClaim').disabled=true;$('minerClaim').textContent='⛏️ ДОБЫЧА…';
-  try{const d=await api('/api/miner/claim',{});renderMiner(d);toast('Добыто +'+d.reward+' очков майнера! ✦')}
-  catch(e){toast(e.message);loadMiner()}
-  finally{state.minerBusy=false}
-};
-refresh();loadMiner();
+refresh();
 </script></body></html>
