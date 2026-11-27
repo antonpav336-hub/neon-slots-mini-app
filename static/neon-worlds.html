@@ -49,7 +49,7 @@ function startBonus(n){bonus+=n;bonusMode=true;globalMult=game==='olympus'?globa
 function scatterSpins(n){if(game==='sugar')return ({3:10,4:12,5:15,6:20,7:30}[Math.min(n,7)]||30);return game==='sweet'?10:15}
 async function runSpin(isBuy=false){
  if(busy)return;let bet=betValue(),cost=bet*(ante?1.25:1);if(isBuy)cost=bet*100;
- if(!bonusMode&&credits<cost){$('message').textContent='Недостаточно демо-кредитов';return}
+ if(!bonusMode&&credits<cost){$('message').textContent='Недостаточно демо-кредитов';if(auto){auto=false;clearTimeout(autoTimer);$('auto').textContent='↻ AUTO: OFF'}return}
  busy=true;$('spin').disabled=true;$('buy').disabled=true;
  if(!bonusMode){credits-=cost;save()}else bonus--;
  $('freespins').textContent=bonus;$('message').textContent=bonusMode?'FREE SPIN…':'Барабаны вращаются…';haptic('medium');
