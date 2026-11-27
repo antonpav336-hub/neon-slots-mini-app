@@ -121,6 +121,12 @@ def init_db():
             case_id TEXT NOT NULL, case_name TEXT NOT NULL, price INTEGER NOT NULL,
             multiplier REAL NOT NULL, payout INTEGER NOT NULL, created_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS slot_spins(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER NOT NULL,
+            game_id TEXT NOT NULL, game_name TEXT NOT NULL, bet INTEGER NOT NULL,
+            symbols TEXT NOT NULL, multiplier REAL NOT NULL, payout INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+        );
         """)
 init_db()
 
@@ -254,6 +260,56 @@ CASE_CONFIG = {
     "legend": {"name": "LEGEND", "price": 1000},
     "cosmic": {"name": "COSMIC", "price": 2500},
 }
+
+
+SLOT_CONFIG = {
+    "olympus": {"name": "OLYMPUS", "symbols": ["⚡", "👑", "🏛️", "💎", "🍇", "🛡️"], "multipliers": {"⚡": 12, "👑": 7, "🏛️": 5, "💎": 3, "🍇": 2, "🛡️": 1.5}},
+    "sweet": {"name": "SWEET BONANZA", "symbols": ["🍭", "🍬", "🍇", "🍉", "🍌", "🍓"], "multipliers": {"🍭": 10, "🍬": 7, "🍇": 5, "🍉": 3, "🍌": 2, "🍓": 1.5}},
+    "sugar": {"name": "SUGAR RUSH", "symbols": ["🍩", "🧁", "🍫", "🍬", "🍒", "🍓"], "multipliers": {"🍩": 12, "🧁": 8, "🍫": 5, "🍬": 3, "🍒": 2, "🍓": 1.5}},
+}
+
+@app.get("/api/slots/history")
+async def slots_history(request: Request):
+    user = await auth(request)
+    with connect() as con:
+        rows = con.execute(
+            "SELECT game_name,bet,symbols,multiplier,payout,created_at FROM slot_spins WHERE uid=? ORDER BY id DESC LIMIT 12",
+            (int(user["id"]),)
+        ).fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+@app.post("/api/slots/spin")
+async def slots_spin(body: dict, request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    game_id = body.get("game_id")
+    config = SLOT_CONFIG.get(game_id) if isinstance(game_id, str) else None
+    bet = body.get("bet")
+    if not config:
+        raise HTTPException(400, "Неизвестный слот.")
+    if isinstance(bet, bool) or not isinstance(bet, int) or bet < 1 or bet > MAX_BET:
+        raise HTTPException(400, f"Ставка должна быть от 1 до {MAX_BET} ⭐.")
+    ensure_user(user)
+    symbols = [secrets.choice(config["symbols"]) for _ in range(3)]
+    multiplier = config["multipliers"].get(symbols[0], 0) if symbols.count(symbols[0]) == 3 else 0
+    payout = int(bet * multiplier)
+    now = int(time.time())
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
+        balance = int(row["bal"]) if row else 0
+        if balance < bet:
+            raise HTTPException(400, f"Недостаточно ⭐. Баланс: {balance} ⭐.")
+        new_balance = balance - bet + payout
+        con.execute("UPDATE users SET bal=? WHERE id=?", (new_balance, uid))
+        con.execute(
+            "INSERT INTO slot_spins(uid,game_id,game_name,bet,symbols,multiplier,payout,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (uid, game_id, config["name"], bet, " ".join(symbols), multiplier, payout, now)
+        )
+    return {"ok": True, "game_id": game_id, "game_name": config["name"],
+            "bet": bet, "symbols": symbols, "multiplier": multiplier,
+            "payout": payout, "net": payout - bet, "balance": new_balance}
+
 
 @app.get("/api/cases/history")
 async def cases_history(request: Request):
