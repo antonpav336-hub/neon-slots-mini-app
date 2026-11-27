@@ -294,7 +294,7 @@ button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
 .case-live-dot{color:#65e8bd;font-size:7px}
 .case-reveal-scene{height:150px;position:relative;display:grid;place-items:center;overflow:hidden}
 .case-aura{position:absolute;width:118px;height:118px;border-radius:50%;background:#985aff55;filter:blur(23px);animation:casePulse 1s ease-in-out infinite alternate}
-.case-big-icon{position:relative;font-size:76px;filter:drop-shadow(0 0 24px #a65dff);animation:caseShake .16s linear infinite}
+.case-big-icon{position:relative;font-size:76px;filter:drop-shadow(0 0 24px #a65dff);animation:caseShake .34s linear infinite}
 .case-sparkles{position:absolute;inset:15px;display:grid;place-items:center;color:#c9a5ff;font-size:18px;letter-spacing:18px;opacity:0;pointer-events:none}
 .case-opening.spinning .case-sparkles{opacity:1;animation:sparkleFlash .35s infinite alternate}
 @keyframes casePulse{to{transform:scale(1.4);opacity:.6}}@keyframes caseShake{0%,100%{transform:translateX(-3px) rotate(-3deg)}50%{transform:translateX(3px) rotate(3deg)}}@keyframes sparkleFlash{to{transform:scale(1.25);opacity:.45}}
@@ -357,6 +357,27 @@ button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
 @keyframes slotRoll{0%{transform:translateY(-3px)}50%{transform:translateY(3px)}100%{transform:translateY(-3px)}}@keyframes slotHit{50%{transform:scale(1.08)}}
 .slot-bet-line{display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;font-size:10px;color:#aab7d6;font-weight:800}.slot-bet-input{width:100%;padding:12px;border:1px solid #3d4b73;border-radius:12px;background:#090f20;color:white;font:800 15px Inter,sans-serif}
 .slot-spin{width:100%;margin-top:12px;padding:15px;border:0;border-radius:14px;background:linear-gradient(100deg,#ff4fae,#a34dff 55%,#4b8dff);color:#fff;font-weight:900;letter-spacing:1px;box-shadow:0 8px 24px #a34dff44}.slot-spin:disabled{opacity:.5}.slot-message{text-align:center;min-height:30px;padding-top:13px;color:#ffd978;font-size:11px;font-weight:900}.slot-history{margin-top:15px}
+
+/* NEON MINES — unified visual language across every section */
+:root{--bg:#070914;--panel:#121a30;--panel2:#1a2541;--line:#35466b;--muted:#a0acc9;--cyan:#71edff;--pink:#ff65bd;--gold:#ffe08a}
+body{background:radial-gradient(ellipse at 12% 0%,#2d3d7655,transparent 40%),radial-gradient(ellipse at 94% 18%,#773b7950,transparent 36%),linear-gradient(180deg,#080b19,#070914 72%)}
+.wrap{max-width:680px;padding-left:16px;padding-right:16px}
+.top{gap:12px}.brand{letter-spacing:3.2px;text-shadow:0 0 20px #65efff55}.avatar{border:1px solid #ffffff30;box-shadow:0 0 25px #a14dff66,inset 0 1px #ffffff45}
+.balance{border-color:#566394;background:linear-gradient(125deg,#292351,#18213d 62%,#103d4b);box-shadow:0 18px 40px #0008,0 0 24px #8d65ff22}.bal-num{font-variant-numeric:tabular-nums;text-shadow:0 0 18px #b9c9ff35}
+.slot-card,.panel,.miner-card,.mines-card,.cashier-card{border-color:#39496f;box-shadow:0 18px 48px #0007,inset 0 1px #ffffff0a;background:linear-gradient(155deg,#1b2744,#11182b 78%)}
+.slot-card,.miner-card,.mines-card{border-radius:25px}
+.section-title{font-size:13px;letter-spacing:1.3px;color:#e6edff}.section-title small{color:#a4b0ce}
+.actions{gap:12px}.action{border-radius:19px;min-height:112px;background:linear-gradient(145deg,#1c2948,#101729);border-color:#3a4b72;box-shadow:inset 0 1px #ffffff12,0 9px 22px #0005;transition:transform .2s,border-color .2s,box-shadow .2s}.action:hover{transform:translateY(-2px);border-color:#6f8cc8;box-shadow:0 14px 30px #0007,0 0 18px #6c7eff20}.action:active{transform:scale(.975)}.action .ico{filter:drop-shadow(0 0 10px #9a8cff55)}
+.game-switch{padding:5px;border:1px solid #35466b;border-radius:17px;background:#0e1528;box-shadow:inset 0 1px #ffffff0b}.game-switch-btn{border-radius:13px;min-height:45px;transition:background .2s,transform .2s,color .2s}.game-switch-btn.active{background:linear-gradient(120deg,#3d3671,#24415b);box-shadow:0 5px 16px #0005,inset 0 1px #ffffff20;color:#fff}.game-switch-btn:active{transform:scale(.97)}
+.cases-hero{border:1px solid #475b89;border-radius:25px;background:radial-gradient(ellipse at 50% 0%,#7852ad55,transparent 58%),linear-gradient(145deg,#202d50,#11182d);box-shadow:0 18px 42px #0007,inset 0 1px #ffffff15}.cases-hero h2{letter-spacing:2px;text-shadow:0 0 22px #a87aff55}.cases-grid{gap:12px}.case-card{border-radius:20px;border-color:#3c4e78;background:linear-gradient(150deg,#202d4e,#11182b);box-shadow:inset 0 1px #ffffff12,0 12px 26px #0005;transition:transform .2s,border-color .2s,box-shadow .2s}.case-card:hover{transform:translateY(-3px);border-color:#7d8fc2;box-shadow:0 18px 32px #0008,0 0 18px #947aff20}.case-art{filter:drop-shadow(0 0 17px #a77aff66)}.case-open-btn{min-height:42px;border-radius:12px;box-shadow:0 8px 20px #8055ff40;transition:filter .2s,transform .2s}.case-open-btn:not(:disabled):active{transform:scale(.97);filter:brightness(1.12)}
+.case-opening,.case-odds{border-radius:22px;border-color:#53628e;background:linear-gradient(155deg,#1c2947,#0e1528);box-shadow:0 16px 36px #0007}.case-result,.case-price,.history-item{font-variant-numeric:tabular-nums}
+.miner-stat,.stat-tile,.pro-preview,.mines-meta{border-color:#36476e;background:linear-gradient(145deg,#101b31,#0c1425);border-radius:15px}.miner-icon{border:1px solid #ffffff20}.miner-claim{min-height:47px;border-radius:14px;box-shadow:0 9px 24px #65f4ff35;transition:transform .2s,filter .2s}.miner-claim:not(:disabled):active{transform:scale(.98);filter:brightness(1.08)}
+.mine-cell{border-radius:14px;background:linear-gradient(145deg,#293b65,#151e37);border-color:#50638f;box-shadow:inset 0 1px #ffffff12,0 6px 14px #0005}.mine-cell:not(:disabled):hover{border-color:#8b9fe0;filter:brightness(1.12)}
+.cashier-card{border-radius:25px}.cashier-button,.sheet button:not(.cancel){min-height:48px;border-radius:14px;box-shadow:0 9px 24px #8e54ff40;transition:transform .18s,filter .18s}.cashier-button:active,.sheet button:not(.cancel):active{transform:scale(.985);filter:brightness(1.1)}
+.sheet{border-color:#465781;background:linear-gradient(155deg,#202b49,#12192d);box-shadow:0 25px 70px #000b}.sheet input{border-color:#45577f;background:#0c1427}.toast{border-color:#60739f;background:linear-gradient(120deg,#252e4d,#17253a);box-shadow:0 10px 28px #0008}
+.history-item{border-color:#293754;padding:12px 2px}.positive{text-shadow:0 0 12px #55e6a533}.negative{text-shadow:0 0 12px #ff4d9d33}
+@media(min-width:680px){.wrap{max-width:760px;padding-top:28px}.actions{grid-template-columns:repeat(3,1fr)}.cases-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.page-heading h2{font-size:38px}.slot-card,.miner-card,.mines-card{padding:23px}}
+@media(max-width:390px){.wrap{padding-left:11px;padding-right:11px}.balance{padding:13px 14px}.bal-num{font-size:25px}.actions{gap:8px}.action{padding:13px 11px;min-height:104px}.cases-grid{gap:8px}.case-card{padding:11px}.mines-board{gap:6px}.mine-cell{border-radius:10px}}
 </style></head>
 <body><div id="intro" aria-label="Загрузка NEON MINES"><div class="intro-content"><div class="intro-mascot">💣</div><div class="intro-title">NEON MINES</div><div class="intro-sub">Добро пожаловать в игру</div><div class="intro-loader"><i></i></div></div></div><main class="wrap"><header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
 <section class="page active" id="page-home"><div class="hero hero-premium"><div class="hero-kicker"><i></i> THE NEON ARENA <span>• LIVE</span></div><div class="hero-stage" aria-hidden="true"><div class="hero-orbit orbit-a"></div><div class="hero-orbit orbit-b"></div><div class="hero-core"><div class="core-glyph">💎</div><div class="core-glint"></div></div><span class="float-gem gem-a">✦</span><span class="float-gem gem-b">◆</span><span class="float-gem gem-c">✧</span></div><h1>PLAY <em>BEYOND</em><br>THE RISK.</h1><p>Твоя удача. Твои правила. Забирай больше.</p><div class="hero-pills"><span>⚡ МГНОВЕННАЯ ИГРА</span><span>✦ TELEGRAM STARS</span></div></div><section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">⭐</span></div></div><div class="coin">⭐</div></section><div class="home-shortcuts"><button class="shortcut primary" data-go="games"><span>💣</span><b>Играть в Минёр</b><small>Открывай клетки и забирай выигрыш</small></button><div class="shortcut-row"><button class="shortcut" data-go="deposit"><span>⭐</span><b>Пополнить</b><small>Telegram Stars</small></button><button class="shortcut" data-go="withdraw"><span>💸</span><b>Вывести</b><small>Заявка на вывод</small></button></div></div><div class="home-caption">ТВОЯ ИГРОВАЯ ЗОНА <span>NEON MINES</span></div></section><section class="page" id="page-games">
@@ -384,7 +405,7 @@ button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
   <button class="case-again" id="caseAgain" hidden>ОТКРЫТЬ ЕЩЁ</button>
 </section>
 <div class="case-odds panel"><div class="case-odds-title">ТАБЛИЦА ВЕРОЯТНОСТЕЙ <span>ОДИНАКОВА ДЛЯ ВСЕХ КЕЙСОВ</span></div>
-  <div class="case-odds-row"><span>0 ⭐</span><b>15%</b></div><div class="case-odds-row"><span>×0,5 от цены</span><b>25%</b></div><div class="case-odds-row"><span>×0,8 от цены</span><b>25%</b></div><div class="case-odds-row"><span>×1 от цены</span><b>20%</b></div><div class="case-odds-row"><span>×1,5 от цены</span><b>12%</b></div><div class="case-odds-row jackpot"><span>×5 от цены · JACKPOT</span><b>3%</b></div>
+  <div class="case-odds-row"><span>0 ⭐</span><b>15%</b></div><div class="case-odds-row"><span>×0,5 от цены</span><b>30%</b></div><div class="case-odds-row"><span>×0,8 от цены</span><b>30%</b></div><div class="case-odds-row"><span>×1 от цены</span><b>17%</b></div><div class="case-odds-row"><span>×1,5 от цены</span><b>7%</b></div><div class="case-odds-row jackpot"><span>×5 от цены · JACKPOT</span><b>1%</b></div>
   <p>Результат определяется на сервере. Анимация показывает уже рассчитанный результат.</p>
 </div>
 <div class="section-title">ИСТОРИЯ ОТКРЫТИЙ <small>Твои последние дропы</small></div><section class="panel" id="caseHistory"><div class="muted" style="font-size:11px">Загрузка истории…</div></section>
@@ -451,7 +472,7 @@ function tone(freq,duration,type='sine',volume=.045){if(!soundEnabled)return;try
 function soundSafe(){tone(660,.11);setTimeout(()=>tone(990,.16),65)}
 function soundBomb(){tone(115,.35,'sawtooth',.075);setTimeout(()=>tone(65,.28,'triangle',.05),90)}
 $('soundToggle').onclick=()=>{soundEnabled=!soundEnabled;$('soundToggle').textContent=soundEnabled?'🔊 ЗВУК: ВКЛ':'🔇 ЗВУК: ВЫКЛ';if(soundEnabled)tone(700,.1)};
-function clientMultiplier(mineCount,safePicks){let p=1;for(let i=0;i<safePicks;i++)p*=(25-mineCount-i)/(25-i);return .97/p}
+function clientMultiplier(mineCount,safePicks){let p=1;for(let i=0;i<safePicks;i++)p*=(25-mineCount-i)/(25-i);return .90/p}
 function updateProPreview(){const maxSafe=25-minesState.mines;const target=Math.min(maxSafe,Math.max(1,Number($('safeTarget').value)||1));$('safeTarget').max=maxSafe;$('safeTarget').value=target;$('safeTargetLabel').textContent=target;const mult=clientMultiplier(minesState.mines,target),payout=Math.floor(minesState.bet*mult);$('proMultiplier').textContent='x'+mult.toFixed(2);$('proPayout').textContent=payout.toLocaleString('ru-RU')+' ⭐';const profit=payout-minesState.bet;$('proProfit').textContent=(profit>0?'+':'')+profit.toLocaleString('ru-RU')+' ⭐';$('proNote').textContent='Если открыть '+target+' безопасных клеток и забрать: выплата '+payout.toLocaleString('ru-RU')+' ⭐. Это расчёт, не гарантия выигрыша.'}
 function syncBet(){ $('betVal').textContent=minesState.bet+' ⭐';$('minesStart').textContent='НАЧАТЬ • '+minesState.bet+' ⭐';$('customBet').value=minesState.bet;updateProPreview()}
 document.querySelectorAll('[data-bet]').forEach(b=>b.onclick=()=>{if(minesState.active)return;const v=b.dataset.bet;minesState.bet=v==='max'?Math.max(1,state.balance):Number(v);document.querySelectorAll('[data-bet]').forEach(x=>x.classList.toggle('selected',x===b));syncBet()});
@@ -495,7 +516,7 @@ async function playCaseRoulette(outcome){
   {transform:'translate3d(-'+(target*.10)+'px,0,0)',offset:.22,easing:'cubic-bezier(.55,.02,.92,.32)'},
   {transform:'translate3d(-'+(target*.76)+'px,0,0)',offset:.61,easing:'cubic-bezier(.08,.78,.16,1)'},
   {transform:end,offset:1}
- ],{duration:5200,fill:'forwards'});
+ ],{duration:6100,fill:'forwards'});
  await animation.finished;
  track.style.transform=end;
  animation.cancel();
