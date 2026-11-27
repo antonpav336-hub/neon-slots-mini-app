@@ -78,7 +78,7 @@ function startBonus(n){bonus+=n;bonusMode=true;globalMult=game==='olympus'?globa
 function scatterSpins(n){if(game==='sugar')return ({3:10,4:12,5:15,6:20,7:30}[Math.min(n,7)]||30);return game==='sweet'?10:15}
 async function runSpin(isBuy=false){
  if(busy)return;
- const bet=betValue();
+ const bet=betValue(),wasBonusMode=bonusMode,previousBonus=bonus;
  if(!initData){toast('Открой Mini App через Telegram-бота');return}
  if(!bonusMode&&serverBalance<(isBuy?bet*100:Math.ceil(bet*(ante?1.25:1)))){toast('Недостаточно звёзд');$('message').textContent='Недостаточно звёзд';return}
  busy=true;syncControls();$('message').textContent=bonusMode?'FREE SPIN…':'Сервер готовит раунд…';SoundManager.click();haptic('medium');
@@ -100,8 +100,7 @@ async function runSpin(isBuy=false){
  (result.spin_mults||[]).forEach((m,i)=>setTimeout(()=>flyMultiplier(m),i*(turbo?90:180)));
  if(game==='sugar'&&bonusMode){[...$('grid').children].forEach((el,i)=>{const hits=cellHits[i]||0;if(hits>1){el.classList.add('mult-up');setTimeout(()=>el.classList.remove('mult-up'),500)}})}
  $('win').textContent=fmt(result.payout);$('mult').textContent=result.multiplier?'×'+result.multiplier:'—';
- if(result.bonus_mode&&!bonusMode)SoundManager.bonus();
- if(result.bonus>bonus)SoundManager.bonus();
+ if((!wasBonusMode&&result.bonus_mode)||(wasBonusMode&&result.bonus>previousBonus))SoundManager.bonus();
  await showBigWin(result.payout,bet);
  if(result.bonus_mode&&result.bonus>0)$('message').textContent='✨ BONUS · '+result.bonus+' FREE SPINS';
  else if(result.payout>0)$('message').textContent='✨ ВЫИГРЫШ +'+fmt(result.payout)+' ✦';
@@ -111,7 +110,7 @@ async function runSpin(isBuy=false){
  busy=false;syncControls();
  if(auto&&(!bonusMode||bonus>0))autoTimer=setTimeout(()=>runSpin(),turbo?250:700);else if(auto){auto=false;$('auto').textContent='↻ AUTO: OFF'}
 }
-document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>{if(busy)return;game=b.dataset.game;bonus=0;bonusMode=false;globalMult=0;cellHits=[];document.querySelectorAll('[data-game]').forEach(x=>x.classList.toggle('active',x===b));$('win').textContent='0';$('mult').textContent='—';$('freespins').textContent='0';$('message').textContent='Новая игра · удачи!';setMode()}));
+document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>{if(busy)return;game=b.dataset.game;bonus=0;bonusMode=false;globalMult=0;cellHits=[];document.querySelectorAll('[data-game]').forEach(x=>x.classList.toggle('active',x===b));$('win').textContent='0';$('mult').textContent='—';$('freespins').textContent='0';$('message').textContent='Новая игра · удачи!';setMode();loadState()}));
 $('minus').onclick=()=>{$('bet').value=Math.max(1,betValue()-1);SoundManager.click()};$('plus').onclick=()=>{$('bet').value=Math.min(1000,betValue()+1);SoundManager.click()};
 $('ante').onclick=()=>{ante=!ante;$('ante').textContent=ante?'ON +25%':'OFF';$('ante').classList.toggle('on',ante)};
 $('spin').onclick=()=>{SoundManager.unlock();runSpin()};$('buy').onclick=()=>{SoundManager.unlock();if(!bonusMode&&confirm('Купить бонус за 100× ставки?'))runSpin(true)};
