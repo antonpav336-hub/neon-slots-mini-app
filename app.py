@@ -297,8 +297,6 @@ _SLOT_GAMES = {
         "symbols":["🐻","🧸","🐻‍❄️","⭐","🫘","🧡","🍡"],
         "high":["⭐","🫘","🧡","🍡"],"mult_count":13},
 }
-for _game_id, _game in _SLOT_GAMES.items():
-    _game["weights"] = GAME_MATH_CONFIG["slots"]["symbol_weights"][_game_id]
 
 # Central game math configuration. Adjust these values here to rebalance every game.
 # Weights are relative; the backend is the only source of RNG and settlement.
@@ -320,6 +318,9 @@ GAME_MATH_CONFIG = {
 }
 _SLOT_MULTS = [2,3,4,5,6,8,10,12,15,20,25,50,100,250,500]
 _SLOT_PAYOUT_FACTOR = GAME_MATH_CONFIG["slots"]["payout_factor"]
+
+for _game_id, _game in _SLOT_GAMES.items():
+    _game["weights"] = GAME_MATH_CONFIG["slots"]["symbol_weights"][_game_id]
 
 def _slot_weighted_symbol(game):
     weights = game.get("weights")
