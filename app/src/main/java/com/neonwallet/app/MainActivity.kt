@@ -280,7 +280,9 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                             }.onFailure { error = it.message ?: "Перевод не выполнен" }
                         }
                     }
-                    if (ownQrOpen && account != null) MyQrDialog(account.id) { ownQrOpen = false }
+                    if (ownQrOpen) account?.let { currentAccount ->
+                        MyQrDialog(currentAccount.id) { ownQrOpen = false }
+                    }
                     if (error.isNotBlank()) AlertDialog(
                         onDismissRequest = { error = "" }, containerColor = Panel,
                         title = { Text("NEON WALLET", color = White) },
