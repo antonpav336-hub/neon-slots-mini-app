@@ -35,14 +35,14 @@ olympus:{title:'THUNDER GOD',sub:'Боги Олимпа · каскадные в
 sweet:{title:'SWEET BLAST',sub:'Конфетный мир · сладкие каскады',cols:6,rows:5,scatter:'🍭',low:['🍌','🍇','🍉','🫐','🍎'],high:['🟦','🟩','🟪','❤️'],symbols:['🍌','🍇','🍉','🫐','🍎','🟦','🟩','🟪','❤️','🍭'],multipliers:[2,3,4,5,6,8,10,12,15,20,25,50,100]},
 sugar:{title:'SUGAR RUSH',sub:'Мармеладный мир · кластерные выплаты',cols:7,rows:7,scatter:'🚀',low:['🐻','🧸','🐻‍❄️'],high:['⭐','🫘','🧡','🍡'],symbols:['🐻','🧸','🐻‍❄️','⭐','🫘','🧡','🍡','🚀'],multipliers:[2,3,4,5,6,8,10,12,15,20,25,50,100]}
 };
-let game='olympus',busy=false,auto=false,autoTimer=null,bonus=0,globalMult=0,bonusMode=false,ante=false,cellHits=[],turbo=false,serverBalance=0;
+let game='olympus',busy=false,auto=false,autoTimer=null,bonus=0,globalMult=0,bonusMode=false,ante=false,cellHits=[],turbo=false,serverBalance=0,serverReady=false;
 const fmt=n=>Math.floor(n).toLocaleString('ru-RU');
 const initData=window.parent?.Telegram?.WebApp?.initData||tg?.initData||'';
 async function api(path,body){const res=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Telegram-Init-Data':initData},body:body?JSON.stringify(body):undefined});let data={};try{data=await res.json()}catch(e){}if(!res.ok)throw new Error(data.detail||'Ошибка сервера');return data}
 function setBalance(n){serverBalance=Number(n)||0;$('balance').textContent=fmt(serverBalance);try{window.parent.postMessage({type:'neon-slots-balance',balance:serverBalance},location.origin)}catch(e){}}
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms*(turbo?.38:1)));
 function toast(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>$('toast').classList.remove('show'),2300)}
-function syncControls(){const locked=busy;['spin','buy','minus','plus','bet','ante','auto'].forEach(id=>{$(id).disabled=locked});document.querySelectorAll('[data-game]').forEach(b=>b.disabled=locked)}
+function syncControls(){const locked=busy;['spin','buy','minus','plus','bet','ante','auto'].forEach(id=>{$(id).disabled=locked||(!serverReady&&(id==='spin'||id==='buy'))});document.querySelectorAll('[data-game]').forEach(b=>b.disabled=locked)}
 
 function rand(a){return a[Math.floor(Math.random()*a.length)]}
 function betValue(){let n=Math.floor(Number($('bet').value)||1);return Math.max(1,Math.min(1000,n))}
@@ -80,7 +80,7 @@ async function runSpin(isBuy=false){
  if(busy)return;
  const bet=betValue(),wasBonusMode=bonusMode,previousBonus=bonus;
  if(!initData){toast('Открой Mini App через Telegram-бота');return}
- if(!bonusMode&&serverBalance<(isBuy?bet*100:Math.ceil(bet*(ante?1.25:1)))){toast('Недостаточно звёзд');$('message').textContent='Недостаточно звёзд';return}
+ if(!bonusMode&&serverReady&&serverBalance<(isBuy?bet*100:Math.ceil(bet*(ante?1.25:1)))){toast('Недостаточно звёзд');$('message').textContent='Недостаточно звёзд';if(auto){auto=false;$('auto').textContent='↻ AUTO: OFF'}return}
  busy=true;syncControls();$('message').textContent=bonusMode?'FREE SPIN…':'Сервер готовит раунд…';SoundManager.click();haptic('medium');
  const requestId=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2));
  let result;
@@ -110,14 +110,14 @@ async function runSpin(isBuy=false){
  busy=false;syncControls();
  if(auto&&(!bonusMode||bonus>0))autoTimer=setTimeout(()=>runSpin(),turbo?250:700);else if(auto){auto=false;$('auto').textContent='↻ AUTO: OFF'}
 }
-document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>{if(busy)return;game=b.dataset.game;bonus=0;bonusMode=false;globalMult=0;cellHits=[];document.querySelectorAll('[data-game]').forEach(x=>x.classList.toggle('active',x===b));$('win').textContent='0';$('mult').textContent='—';$('freespins').textContent='0';$('message').textContent='Новая игра · удачи!';setMode();loadState()}));
+document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>{if(busy)return;game=b.dataset.game;bonus=0;bonusMode=false;globalMult=0;cellHits=[];serverReady=false;syncControls();document.querySelectorAll('[data-game]').forEach(x=>x.classList.toggle('active',x===b));$('win').textContent='0';$('mult').textContent='—';$('freespins').textContent='0';$('message').textContent='Новая игра · удачи!';setMode();loadState()}));
 $('minus').onclick=()=>{$('bet').value=Math.max(1,betValue()-1);SoundManager.click()};$('plus').onclick=()=>{$('bet').value=Math.min(1000,betValue()+1);SoundManager.click()};
 $('ante').onclick=()=>{ante=!ante;$('ante').textContent=ante?'ON +25%':'OFF';$('ante').classList.toggle('on',ante)};
 $('spin').onclick=()=>{SoundManager.unlock();runSpin()};$('buy').onclick=()=>{SoundManager.unlock();if(!bonusMode&&confirm('Купить бонус за 100× ставки?'))runSpin(true)};
 $('auto').onclick=()=>{auto=!auto;$('auto').textContent=auto?'↻ AUTO: ON':'↻ AUTO: OFF';if(auto&&!busy)runSpin();if(!auto)clearTimeout(autoTimer)};
 $('sound').onclick=()=>{SoundManager.setEnabled($('sound').textContent==='🔇');$('sound').textContent=$('sound').textContent==='🔇'?'🔊':'🔇';SoundManager.click()};
 $('turbo').onclick=()=>{turbo=!turbo;$('turbo').textContent='⚡ TURBO: '+(turbo?'ON':'OFF');$('turbo').classList.toggle('active',turbo);SoundManager.click()};
-async function loadState(){try{const d=await api('/api/slots/state/'+game);setBalance(d.balance);bonus=d.bonus;bonusMode=d.bonus_mode;globalMult=d.global_mult;$('freespins').textContent=bonus;$('bonusCount').textContent=bonus;$('globalMult').textContent=globalMult;$('modeLabel').textContent=bonusMode?'FREE SPINS':'BASE GAME';$('bonusbar').classList.toggle('show',bonusMode)}catch(e){$('message').textContent=e.message}}
+async function loadState(){serverReady=false;syncControls();try{const d=await api('/api/slots/state/'+game);setBalance(d.balance);bonus=d.bonus;bonusMode=d.bonus_mode;globalMult=d.global_mult;$('freespins').textContent=bonus;$('bonusCount').textContent=bonus;$('globalMult').textContent=globalMult;$('modeLabel').textContent=bonusMode?'FREE SPINS':'BASE GAME';$('bonusbar').classList.toggle('show',bonusMode);serverReady=true;syncControls()}catch(e){$('message').textContent=e.message;serverReady=false;syncControls()}}
 setMode();loadState();
 })();
 </script></body></html>
