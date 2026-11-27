@@ -45,9 +45,16 @@ private val Muted = Color(0xFFA69BB8)
 private const val API_BASE = "https://neon-wallet-api-rpkc.onrender.com"
 
 class MainActivity : ComponentActivity() {
+    private var lockAction: (() -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { NeonWalletApp() }
+        setContent { NeonWalletApp { action -> lockAction = action } }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        lockAction?.invoke()
     }
 }
 
@@ -119,7 +126,7 @@ private fun <T> async(task: () -> T, done: (Result<T>) -> Unit) {
 }
 
 @Composable
-private fun NeonWalletApp() {
+private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences("neon_wallet_session", 0) }
     var token by remember { mutableStateOf(prefs.getString("access_token", null)) }
@@ -153,7 +160,16 @@ private fun NeonWalletApp() {
         }
     }
 
-    LaunchedEffect(token) {
+    SideEffect {
+        registerLock {
+            if (token != null && prefs.contains("pin_hash")) {
+                page = "pin"
+                transferOpen = false
+            }
+        }
+    }
+
+    LaunchedEffect(token, page) {
         if (token == null) page = "auth"
         else if (page == "loading") refresh(token!!)
     }
