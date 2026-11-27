@@ -168,11 +168,7 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
     }
     val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         contactsAllowed = granted
-        if (granted) {
-            async({ readPhoneContacts(context) }) { result ->
-                phoneContacts = result.getOrDefault(emptyList())
-            }
-        } else error = "Доступ к контактам не разрешён."
+        if (!granted) error = "Доступ к контактам не разрешён."
     }
 
     val qrScanner = rememberLauncherForActivityResult(ScanContract()) { scanResult ->
