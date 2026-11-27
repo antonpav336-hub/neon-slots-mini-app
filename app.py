@@ -263,7 +263,7 @@ CASE_CONFIG = {
 
 
 SLOT_CONFIG = {
-    "olympus": {"name": "OLYMPUS", "symbols": ["⚡", "👑", "🏛️", "💎", "🍇", "🛡️"], "weights": [4, 8, 12, 18, 26, 32], "multipliers": {"⚡": 12, "👑": 7, "🏛️": 5, "💎": 3, "🍇": 2, "🛡️": 1.5}},
+    "olympus": {"name": "OLYMPUS", "symbols": ["⚡", "👑", "🏛️", "💎", "🍇", "🛡️"], "multipliers": {"⚡": 12, "👑": 7, "🏛️": 5, "💎": 3, "🍇": 2, "🛡️": 1.5}},
     "sweet": {"name": "SWEET BONANZA", "symbols": ["🍭", "🍬", "🍇", "🍉", "🍌", "🍓"], "weights": [4, 8, 12, 18, 26, 32], "multipliers": {"🍭": 10, "🍬": 7, "🍇": 5, "🍉": 3, "🍌": 2, "🍓": 1.5}},
     "sugar": {"name": "SUGAR RUSH", "symbols": ["🍩", "🧁", "🍫", "🍬", "🍒", "🍓"], "weights": [4, 8, 12, 18, 26, 32], "multipliers": {"🍩": 12, "🧁": 8, "🍫": 5, "🍬": 3, "🍒": 2, "🍓": 1.5}},
 }
@@ -288,15 +288,18 @@ with connect() as _con:
 
 _SLOT_GAMES = {
     "olympus": {"name":"THUNDER GOD","cols":6,"rows":5,"scatter":"⚡",
-        "symbols":["🔵","🟢","🟡","🟣","🔴","🏆","💍","⌛","👑"],"weights":[14,14,14,14,14,8,8,7,7],
+        "symbols":["🔵","🟢","🟡","🟣","🔴","🏆","💍","⌛","👑"],
         "high":["🏆","💍","⌛","👑"],"mult_count":15},
     "sweet": {"name":"SWEET BLAST","cols":6,"rows":5,"scatter":"🍭",
-        "symbols":["🍌","🍇","🍉","🫐","🍎","🟦","🟩","🟪","❤️"],"weights":[14,14,14,14,14,8,8,7,7],
+        "symbols":["🍌","🍇","🍉","🫐","🍎","🟦","🟩","🟪","❤️"],
         "high":["🟦","🟩","🟪","❤️"],"mult_count":13},
     "sugar": {"name":"SUGAR RUSH","cols":7,"rows":7,"scatter":"🚀",
-        "symbols":["🐻","🧸","🐻‍❄️","⭐","🫘","🧡","🍡"],"weights":[15,15,15,14,14,14,13],
+        "symbols":["🐻","🧸","🐻‍❄️","⭐","🫘","🧡","🍡"],
         "high":["⭐","🫘","🧡","🍡"],"mult_count":13},
 }
+for _game_id, _game in _SLOT_GAMES.items():
+    _game["weights"] = GAME_MATH_CONFIG["slots"]["symbol_weights"][_game_id]
+
 # Central game math configuration. Adjust these values here to rebalance every game.
 # Weights are relative; the backend is the only source of RNG and settlement.
 GAME_MATH_CONFIG = {
@@ -307,12 +310,13 @@ GAME_MATH_CONFIG = {
         "cascade_multiplier_bps": {"olympus": 300, "sweet": 500},
         "multiplier_weights": [60, 22, 9, 4, 2, 1.2, 0.8, 0.5, 0.25, 0.15, 0.1, 0.05, 0.025, 0.01, 0.005],
         "scatter_payouts": {4: 2, 5: 4, 6: 8},
+        "symbol_weights": {"olympus": [14,14,14,14,14,8,8,7,7], "sweet": [14,14,14,14,14,8,8,7,7], "sugar": [15,15,15,14,14,14,13]},
     },
     "cases": {
         "outcomes": [(1500, 0.0), (4500, 0.5), (7500, 0.8), (9200, 1.0), (9900, 1.5), (10000, 5.0)]
     },
     "mines": {"cashout_rtp": 0.90},
-    "classic_slots": {"pair_multiplier": 0.7, "triple_multiplier": 3.0, "jackpot_multiplier": 10.0, "payout_factor": 0.85}
+    "classic_slots": {"pair_multiplier": 0.7, "triple_multiplier": 3.0, "jackpot_multiplier": 10.0, "payout_factor": 0.85, "symbol_weights": {"olympus": [4,8,12,18,26,32], "sweet": [4,8,12,18,26,32], "sugar": [4,8,12,18,26,32]}, "legacy_spin_weights": [28,26,22,15,9]}
 }
 _SLOT_MULTS = [2,3,4,5,6,8,10,12,15,20,25,50,100,250,500]
 _SLOT_PAYOUT_FACTOR = GAME_MATH_CONFIG["slots"]["payout_factor"]
@@ -603,7 +607,7 @@ async def slots_spin(body: dict, request: Request):
     if isinstance(bet, bool) or not isinstance(bet, int) or bet < 1 or bet > MAX_BET:
         raise HTTPException(400, f"Ставка должна быть от 1 до {MAX_BET} ⭐.")
     ensure_user(user)
-    symbols = [secrets.SystemRandom().choices(config["symbols"], weights=config["weights"], k=1)[0] for _ in range(3)]
+    symbols = [secrets.SystemRandom().choices(config["symbols"], weights=GAME_MATH_CONFIG["classic_slots"]["symbol_weights"][game_id], k=1)[0] for _ in range(3)]
     multiplier = config["multipliers"].get(symbols[0], 0) if symbols.count(symbols[0]) == 3 else 0
     payout = int(bet * multiplier * GAME_MATH_CONFIG["classic_slots"]["payout_factor"])
     now = int(time.time())
@@ -916,7 +920,7 @@ async def spin(body: Amount, request: Request):
     if bet > MAX_BET:
         raise HTTPException(400, f"Максимальная ставка: {MAX_BET}.")
     symbols = ["🍒","🍋","🍇","🔔","7️⃣"]
-    reels = [secrets.choice(symbols) for _ in range(3)]
+    reels = [secrets.SystemRandom().choices(symbols, weights=GAME_MATH_CONFIG["classic_slots"]["legacy_spin_weights"], k=1)[0] for _ in range(3)]
     if reels == ["7️⃣","7️⃣","7️⃣"]:
         mult = GAME_MATH_CONFIG["classic_slots"]["jackpot_multiplier"]
     elif reels[0] == reels[1] == reels[2]:
