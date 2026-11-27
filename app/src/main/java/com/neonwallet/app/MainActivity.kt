@@ -239,7 +239,8 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                         result.onSuccess {
                             prefs.edit().putString("access_token", it).apply()
                             token = it
-                            page = "pin_setup"
+                            // Existing users must verify their saved PIN after password login.
+                            page = if (prefs.contains("pin_hash")) "pin" else "pin_setup"
                         }.onFailure { error = it.message ?: "Ошибка входа" }
                     }
                 }
