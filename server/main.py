@@ -7,7 +7,7 @@ import jwt
 import psycopg
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 from psycopg.rows import dict_row
@@ -202,6 +202,22 @@ def login(body: LoginRequest):
 @app.get("/v1/me")
 def me(user: User):
     return {"user": public_user(user)}
+
+
+@app.get("/v1/recipients/search")
+def search_recipients(user: User, q: str = Query(min_length=3, max_length=32)):
+    query = q.strip()
+    if not query:
+        return {"items": []}
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT account_id, username FROM users
+               WHERE id <> %s AND (account_id = %s OR username ILIKE %s)
+               ORDER BY CASE WHEN account_id = %s THEN 0 ELSE 1 END, username
+               LIMIT 10""",
+            (user["id"], query, query + "%", query),
+        ).fetchall()
+    return {"items": [{"account_id": row["account_id"], "username": row["username"]} for row in rows]}
 
 
 @app.get("/v1/wallet")
