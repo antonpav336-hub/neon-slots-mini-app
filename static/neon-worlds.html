@@ -33,7 +33,7 @@ function rand(a){return a[Math.floor(Math.random()*a.length)]}
 function betValue(){let n=Math.floor(Number($('bet').value)||1);return Math.max(1,Math.min(1000,n))}
 function weightedSymbol(){const g=games[game];let pool=g.symbols;return rand(pool)}
 function matrix(){const g=games[game];return Array.from({length:g.rows},()=>Array.from({length:g.cols},weightedSymbol))}
-function draw(board,marks=[],spots=[]){const g=games[game],root=$('grid');root.style.gridTemplateColumns='repeat('+g.cols+',minmax(0,1fr))';root.innerHTML='';board.forEach((row,r)=>row.forEach((sym,c)=>{let idx=r*g.cols+c,el=document.createElement('div');el.className='cell'+(marks.includes(idx)?' win':'')+(spots[idx]>1?' mult':'');el.textContent=sym;if(game==='sugar'&&spots[idx]>0){let sp=document.createElement('i');sp.className='spot';el.appendChild(sp);if(spots[idx]>1){let x=document.createElement('b');x.className='x';x.textContent='×'+spots[idx];el.appendChild(x)}}root.appendChild(el)}))}
+function draw(board,marks=[],spots=[]){const g=games[game],root=$('grid');root.style.gridTemplateColumns='repeat('+g.cols+',minmax(0,1fr))';root.innerHTML='';board.forEach((row,r)=>row.forEach((sym,c)=>{let idx=r*g.cols+c,el=document.createElement('div');el.className='cell'+(marks.includes(idx)?' win':'')+(spots[idx]>1?' mult':'');el.textContent=sym;if(game==='sugar'&&spots[idx]>0){let sp=document.createElement('i');sp.className='spot';el.appendChild(sp);if(spots[idx]>1){let x=document.createElement('b');x.className='x';x.textContent='×'+Math.pow(2,spots[idx]-1);el.appendChild(x)}}root.appendChild(el)}))}
 function hapticDrop(){haptic('medium')}
 function pickMult(){const g=games[game],weights=[22,18,15,12,10,7,5,4,2.5,1.8,1.2,.8,.4,.2,.1];let n=Math.random()*weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++){n-=weights[i];if(n<=0)return g.multipliers[i]}return 2}
 function findAnywhere(board){const counts={};board.flat().forEach((s,i)=>{if(s==='⚡'||s==='🍭'||s==='🚀')return;(counts[s]??=[]).push(i)});return Object.entries(counts).filter(([s,ids])=>ids.length>=8).map(([s,ids])=>({s,ids}))}
@@ -59,7 +59,7 @@ async function runSpin(isBuy=false){
  draw(board);await new Promise(r=>setTimeout(r,ante?180:420));
  if(game==='sugar'){
   while(cascades<12){let groups=findClusters(board);if(!groups.length)break;let remove=[],clusterPay=0;
-   for(const gr of groups){let m=1;for(const id of gr.ids){if(cellHits[id]>0)m+=cellHits[id];cellHits[id]=Math.min(128,cellHits[id]?cellHits[id]*2:1)}clusterPay+=symbolPay(gr.s,gr.ids.length,bet)*m;remove.push(...gr.ids)}
+   for(const gr of groups){let m=1;for(const id of gr.ids){if(cellHits[id]>0)m+=Math.pow(2,cellHits[id]-1);cellHits[id]=Math.min(8,cellHits[id]+1)}clusterPay+=symbolPay(gr.s,gr.ids.length,bet)*m;remove.push(...gr.ids)}
    winTotal+=clusterPay;draw(board,remove,cellHits);haptic('heavy');$('machine').classList.add('shake');await new Promise(r=>setTimeout(r,260));$('machine').classList.remove('shake');gravity(board,[...new Set(remove)]);draw(board,[],cellHits);cascades++;await new Promise(r=>setTimeout(r,ante?100:230));
   }
  }else{
@@ -72,7 +72,7 @@ async function runSpin(isBuy=false){
  if(game==='olympus'&&spinMults.length&&winTotal>0){allMult=spinMults.reduce((a,b)=>a+b,0);winTotal*=allMult;zeusStrike()}
  if(game==='sweet'&&bonusMode&&spinMults.length&&winTotal>0){allMult=spinMults.reduce((a,b)=>a+b,0);winTotal*=allMult}
  if(game==='olympus'&&bonusMode&&spinMults.length&&winTotal>0){globalMult+=spinMults.reduce((a,b)=>a+b,0);allMult=globalMult;winTotal*=globalMult}
- if(game==='sugar'&&bonusMode&&winTotal>0){allMult=cellHits.reduce((a,b)=>a+(b>1?b:0),0);if(allMult)winTotal*=allMult}
+ if(game==='sugar'&&bonusMode&&winTotal>0){allMult=cellHits.reduce((a,b)=>a+(b>1?Math.pow(2,b-1):0),0);if(allMult)winTotal*=allMult}
  winTotal=Math.floor(winTotal);credits+=winTotal;save();$('win').textContent=fmt(winTotal);$('mult').textContent=allMult?'×'+allMult:'—';
  let retrigger=game==='sugar'?boardScatter>=3:boardScatter>=3;
  if(boardScatter>=4&&!bonusMode){startBonus(scatterSpins(boardScatter))}
