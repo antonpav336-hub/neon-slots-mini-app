@@ -29,6 +29,11 @@ import java.net.URL
 import java.text.NumberFormat
 import java.util.Locale
 import java.util.UUID
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Base64
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 private val Bg = Color(0xFF090711)
 private val Panel = Color(0xFF171323)
@@ -121,7 +126,7 @@ private fun NeonWalletApp() {
     var account by remember { mutableStateOf<Account?>(null) }
     var wallet by remember { mutableStateOf<Wallet?>(null) }
     var txs by remember { mutableStateOf<List<Tx>>(emptyList()) }
-    var page by remember { mutableStateOf(if (token == null) "auth" else "loading") }
+    var page by remember { mutableStateOf(if (token == null) "auth" else "pin") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var tab by remember { mutableIntStateOf(0) }
@@ -150,10 +155,7 @@ private fun NeonWalletApp() {
 
     LaunchedEffect(token) {
         if (token == null) page = "auth"
-        else if (page != "wallet") {
-            page = "loading"
-            refresh(token!!)
-        }
+        else if (page == "loading") refresh(token!!)
     }
 
     MaterialTheme(colorScheme = darkColorScheme(
@@ -162,6 +164,8 @@ private fun NeonWalletApp() {
     )) {
         Surface(Modifier.fillMaxSize(), color = Bg) {
             when (page) {
+                "pin" -> PinScreen(prefs, setup = false, onComplete = { page = "loading" })
+                "pin_setup" -> PinScreen(prefs, setup = true, onComplete = { page = "loading" })
                 "auth" -> AuthScreen(busy, error) { register, name, email, password ->
                     busy = true
                     error = ""
@@ -173,7 +177,7 @@ private fun NeonWalletApp() {
                         result.onSuccess {
                             prefs.edit().putString("access_token", it).apply()
                             token = it
-                            page = "loading"
+                            page = "pin_setup"
                         }.onFailure { error = it.message ?: "Ошибка входа" }
                     }
                 }
@@ -185,7 +189,7 @@ private fun NeonWalletApp() {
                                 0 -> HomeScreen(account, wallet, txs, busy, { transferOpen = true }, { token?.let { refresh(it) } })
                                 1 -> HistoryScreen(txs)
                                 else -> ProfileScreen(account) {
-                                    prefs.edit().remove("access_token").apply()
+                                    prefs.edit().remove("access_token").remove("pin_salt").remove("pin_hash").apply()
                                     token = null
                                     account = null
                                     wallet = null
@@ -490,3 +494,152 @@ private fun BottomBar(selected: Int, select: (Int) -> Unit) {
 
 private fun money(kopecks: Long): String =
     NumberFormat.getNumberInstance(Locale("ru", "RU")).format(kopecks / 100.0) + " ₽"
+
+
+private fun derivePinHash(pin: String, salt: ByteArray): ByteArray {
+    val spec = PBEKeySpec(pin.toCharArray(), salt, 150_000, 256)
+    return try {
+        SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    } finally {
+        spec.clearPassword()
+    }
+}
+
+private fun storePin(prefs: android.content.SharedPreferences, pin: String) {
+    val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+    val hash = derivePinHash(pin, salt)
+    prefs.edit()
+        .putString("pin_salt", Base64.getEncoder().encodeToString(salt))
+        .putString("pin_hash", Base64.getEncoder().encodeToString(hash))
+        .apply()
+}
+
+private fun verifyPin(prefs: android.content.SharedPreferences, pin: String): Boolean {
+    return try {
+        val salt = Base64.getDecoder().decode(prefs.getString("pin_salt", null) ?: return false)
+        val expected = Base64.getDecoder().decode(prefs.getString("pin_hash", null) ?: return false)
+        MessageDigest.isEqual(expected, derivePinHash(pin, salt))
+    } catch (_: Exception) {
+        false
+    }
+}
+
+@Composable
+private fun PinScreen(
+    prefs: android.content.SharedPreferences,
+    setup: Boolean,
+    onComplete: () -> Unit
+) {
+    var pin by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    val hasPin = prefs.contains("pin_hash")
+    val isSetup = setup || !hasPin
+
+    Box(
+        Modifier.fillMaxSize().background(
+            Brush.verticalGradient(listOf(Color(0xFF241638), Bg, Bg))
+        ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            BrandMark(64)
+            Spacer(Modifier.height(24.dp))
+            Text(
+                if (isSetup) "Создай PIN-код" else "Введи PIN-код",
+                color = White, fontSize = 25.sp, fontWeight = FontWeight.Bold
+            )
+            Text(
+                if (isSetup) "Он понадобится при каждом новом входе в приложение"
+                else "Защита доступа к NEON WALLET",
+                color = Muted, fontSize = 12.sp,
+                modifier = Modifier.padding(top = 8.dp, bottom = 22.dp)
+            )
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                    .background(Panel)
+                    .border(1.dp, Purple.copy(alpha = .25f), RoundedCornerShape(24.dp))
+                    .padding(20.dp)
+            ) {
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { value ->
+                        if (value.length <= 6 && value.all(Char::isDigit)) {
+                            pin = value
+                            error = ""
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("6 цифр") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = White, unfocusedTextColor = White,
+                        focusedBorderColor = Purple, unfocusedBorderColor = Color(0xFF51445F),
+                        focusedLabelColor = Lavender, unfocusedLabelColor = Muted,
+                        cursorColor = Lavender
+                    )
+                )
+                if (isSetup) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = confirmation,
+                        onValueChange = { value ->
+                            if (value.length <= 6 && value.all(Char::isDigit)) {
+                                confirmation = value
+                                error = ""
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Повтори PIN-код") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = White, unfocusedTextColor = White,
+                            focusedBorderColor = Purple, unfocusedBorderColor = Color(0xFF51445F),
+                            focusedLabelColor = Lavender, unfocusedLabelColor = Muted,
+                            cursorColor = Lavender
+                        )
+                    )
+                }
+                if (error.isNotBlank()) {
+                    Text(error, color = Color(0xFFFF8585), fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 10.dp))
+                }
+                Spacer(Modifier.height(18.dp))
+                Button(
+                    onClick = {
+                        if (pin.length != 6) {
+                            error = "PIN должен состоять из 6 цифр"
+                        } else if (isSetup) {
+                            if (pin != confirmation) error = "PIN-коды не совпадают"
+                            else {
+                                storePin(prefs, pin)
+                                onComplete()
+                            }
+                        } else if (verifyPin(prefs, pin)) {
+                            onComplete()
+                        } else {
+                            pin = ""
+                            error = "Неверный PIN-код"
+                        }
+                    },
+                    enabled = pin.length == 6 && (!isSetup || confirmation.length == 6),
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(15.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple)
+                ) {
+                    Text(if (isSetup) "Сохранить PIN" else "Разблокировать",
+                        fontWeight = FontWeight.Bold)
+                }
+            }
+            Text("PIN хранится только на этом устройстве", color = Muted, fontSize = 10.sp,
+                modifier = Modifier.padding(top = 18.dp))
+        }
+    }
+}
