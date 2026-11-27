@@ -551,6 +551,7 @@ async def slots_play(body: dict, request: Request):
 @app.get("/api/slots/state/{game_id}")
 async def slots_state(game_id: str, request: Request):
     user = await auth(request)
+    ensure_user(user)
     if game_id not in _SLOT_GAMES:
         raise HTTPException(400,"Неизвестный слот.")
     with connect() as con:
