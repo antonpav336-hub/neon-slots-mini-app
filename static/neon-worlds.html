@@ -31,11 +31,11 @@ const fmt=n=>Math.floor(n).toLocaleString('ru-RU');
 function save(){localStorage.setItem('neon_demo_credits',String(credits));$('balance').textContent=fmt(credits)}
 function rand(a){return a[Math.floor(Math.random()*a.length)]}
 function betValue(){let n=Math.floor(Number($('bet').value)||1);return Math.max(1,Math.min(1000,n))}
-function weightedSymbol(){const g=games[game];let pool=g.symbols;return rand(pool)}
+function weightedSymbol(){const g=games[game];return rand(g.symbols.filter(s=>s!==g.scatter))}
 function matrix(){const g=games[game];return Array.from({length:g.rows},()=>Array.from({length:g.cols},weightedSymbol))}
 function draw(board,marks=[],spots=[]){const g=games[game],root=$('grid');root.style.gridTemplateColumns='repeat('+g.cols+',minmax(0,1fr))';root.innerHTML='';board.forEach((row,r)=>row.forEach((sym,c)=>{let idx=r*g.cols+c,el=document.createElement('div');el.className='cell'+(marks.includes(idx)?' win':'')+(spots[idx]>1?' mult':'');el.textContent=sym;if(game==='sugar'&&spots[idx]>0){let sp=document.createElement('i');sp.className='spot';el.appendChild(sp);if(spots[idx]>1){let x=document.createElement('b');x.className='x';x.textContent='×'+Math.pow(2,spots[idx]-1);el.appendChild(x)}}root.appendChild(el)}))}
 function hapticDrop(){haptic('medium')}
-function pickMult(){const g=games[game],weights=[22,18,15,12,10,7,5,4,2.5,1.8,1.2,.8,.4,.2,.1];let n=Math.random()*weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++){n-=weights[i];if(n<=0)return g.multipliers[i]}return 2}
+function pickMult(){const g=games[game],weights=[22,18,15,12,10,7,5,4,2.5,1.8,1.2,.8,.4,.2,.1].slice(0,g.multipliers.length);let n=Math.random()*weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++){n-=weights[i];if(n<=0)return g.multipliers[i]}return g.multipliers[0]}
 function findAnywhere(board){const counts={};board.flat().forEach((s,i)=>{if(s==='⚡'||s==='🍭'||s==='🚀')return;(counts[s]??=[]).push(i)});return Object.entries(counts).filter(([s,ids])=>ids.length>=8).map(([s,ids])=>({s,ids}))}
 function findClusters(board){const g=games[game],seen=new Set(),out=[];for(let r=0;r<g.rows;r++)for(let c=0;c<g.cols;c++){let s=board[r][c],start=r*g.cols+c;if(s===g.scatter||seen.has(start))continue;let q=[start],group=[];seen.add(start);while(q.length){let id=q.pop(),rr=Math.floor(id/g.cols),cc=id%g.cols;group.push(id);for(const [nr,nc] of [[rr-1,cc],[rr+1,cc],[rr,cc-1],[rr,cc+1]]){if(nr<0||nc<0||nr>=g.rows||nc>=g.cols)continue;let ni=nr*g.cols+nc;if(!seen.has(ni)&&board[nr][nc]===s){seen.add(ni);q.push(ni)}}}if(group.length>=5)out.push({s,ids:group})}return out}
 function symbolPay(s,count,bet){let high=games[game].high.includes(s);if(game==='sugar'){let base=high?.48:.24;return bet*base*Math.max(1,count/5)**(high?1.7:1.4)}if(count>=12)return bet*(high?12+Math.min(38,(count-12)*4):2+Math.min(8,(count-12)*.8));return bet*(high?1.5+Math.max(0,count-8)*1.6:.25+Math.max(0,count-8)*.25)}
@@ -55,7 +55,7 @@ async function runSpin(isBuy=false){
  $('freespins').textContent=bonus;$('message').textContent=bonusMode?'FREE SPIN…':'Барабаны вращаются…';haptic('medium');
  let g=games[game],board=matrix(),scatterTarget=isBuy?(game==='sugar'?3+Math.floor(Math.random()*5):4+Math.floor(Math.random()*3)):null;
  if(scatterTarget)placeScatters(board,scatterTarget);
- else if(Math.random()<(ante?.13:.065))placeScatters(board,4+Math.floor(Math.random()*Math.min(3,g.cols)));
+ else if(Math.random()<(ante?.13:.065)){const min=game==='sugar'?3:4,max=game==='sugar'?7:6;placeScatters(board,min+Math.floor(Math.random()*(max-min+1)))}
  cellHits=game==='sugar'?(bonusMode?cellHits:Array(g.rows*g.cols).fill(0)):[];let winTotal=0,allMult=0,cascades=0,boardScatter=scatterCount(board),spinMults=[];
  draw(board);await new Promise(r=>setTimeout(r,ante?180:420));
  if(game==='sugar'){
