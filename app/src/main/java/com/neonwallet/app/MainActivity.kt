@@ -285,27 +285,8 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                 }
                 "loading" -> LoadingScreen()
                 else -> {
-                    Column(Modifier.fillMaxSize()) {
-                        Box(Modifier.weight(1f)) {
-                            when (tab) {
-                                0 -> HomeScreen(account, wallet, txs, busy, { transferOpen = true }, { token?.let { refresh(it) } }, { ownQrOpen = true })
-                                1 -> HistoryScreen(txs)
-                                2 -> ContactsScreen(phoneContacts, contactsAllowed) {
-                                    contactsPermission.launch(Manifest.permission.READ_CONTACTS)
-                                }
-                                else -> ProfileScreen(account) {
-                                    prefs.edit().remove("access_token").remove("pin_salt").remove("pin_hash").apply()
-                                    token = null
-                                    account = null
-                                    wallet = null
-                                    txs = emptyList()
-                                    page = "auth"
-                                }
-                            }
-                        }
-                        BottomBar(tab) { tab = it }
-                    }
-                    if (transferOpen) TransferScreen(
+                    if (transferOpen) {
+                        TransferScreen(
                         balance = wallet?.balance ?: 0L, busy = busy, initialRecipient = qrRecipient,
                         recipients = recipientResults, searching = recipientSearching, searchError = recipientSearchError,
                         scanQr = startQrScan,
@@ -336,6 +317,28 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                             }
                         }
                     )
+                    } else {
+                        Column(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f)) {
+                                when (tab) {
+                                    0 -> HomeScreen(account, wallet, txs, busy, { transferOpen = true }, { token?.let { refresh(it) } }, { ownQrOpen = true })
+                                    1 -> HistoryScreen(txs)
+                                    2 -> ContactsScreen(phoneContacts, contactsAllowed) {
+                                        contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+                                    }
+                                    else -> ProfileScreen(account) {
+                                        prefs.edit().remove("access_token").remove("pin_salt").remove("pin_hash").apply()
+                                        token = null
+                                        account = null
+                                        wallet = null
+                                        txs = emptyList()
+                                        page = "auth"
+                                    }
+                                }
+                            }
+                            BottomBar(tab) { tab = it }
+                        }
+                    }
                     if (ownQrOpen) account?.let { currentAccount ->
                         MyQrDialog(currentAccount.id) { ownQrOpen = false }
                     }
