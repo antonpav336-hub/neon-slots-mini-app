@@ -1,8 +1,10 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
+*.iml
+.gradle/
+.idea/
+local.properties
+.DS_Store
+/build/
+**/build/
 .env
-casino.db
-*.sqlite3
-*.log
+.env.*
+!.env.example
