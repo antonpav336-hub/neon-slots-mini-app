@@ -43,6 +43,8 @@ import java.net.URL
 import java.text.NumberFormat
 import java.util.Locale
 import java.util.UUID
+import java.net.URLEncoder
+import java.math.BigDecimal
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
@@ -79,6 +81,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private data class PhoneContact(val name: String, val number: String)
+private data class Recipient(val id: String, val username: String)
 private data class Account(val id: String, val username: String, val email: String)
 private data class Wallet(val id: String, val balance: Long)
 private data class Tx(val id: String, val title: String, val date: String, val amount: Long, val incoming: Boolean)
@@ -133,10 +136,20 @@ private object WalletApi {
         return Triple(account, wallet, txs)
     }
 
-    fun transfer(token: String, recipient: String, rubles: Long) =
+    fun searchRecipients(token: String, query: String): List<Recipient> {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val array = call("GET", "/v1/recipients/search?q=$encoded", token).getJSONArray("items")
+        return (0 until array.length()).map { i ->
+            val item = array.getJSONObject(i)
+            Recipient(item.getString("account_id"), item.getString("username"))
+        }
+    }
+
+    fun transfer(token: String, recipient: String, amountKopecks: Long, description: String) =
         call("POST", "/v1/transfers", token,
-            JSONObject().put("recipient_account_id", recipient).put("amount_kopecks", rubles * 100)
-                .put("description", "Перевод NEON WALLET"), UUID.randomUUID().toString())
+            JSONObject().put("recipient_account_id", recipient).put("amount_kopecks", amountKopecks)
+                .put("description", description.ifBlank { "Перевод NEON WALLET" }),
+            UUID.randomUUID().toString())
 }
 
 private fun <T> async(task: () -> T, done: (Result<T>) -> Unit) {
@@ -162,6 +175,9 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
     var transferOpen by remember { mutableStateOf(false) }
     var ownQrOpen by remember { mutableStateOf(false) }
     var qrRecipient by remember { mutableStateOf("") }
+    var recipientResults by remember { mutableStateOf<List<Recipient>>(emptyList()) }
+    var recipientSearching by remember { mutableStateOf(false) }
+    var recipientSearchError by remember { mutableStateOf("") }
     var phoneContacts by remember { mutableStateOf<List<PhoneContact>>(emptyList()) }
     var contactsAllowed by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED)
@@ -289,18 +305,37 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                         }
                         BottomBar(tab) { tab = it }
                     }
-                    if (transferOpen) TransferDialog(wallet?.balance ?: 0L, busy, { transferOpen = false },
-                        startQrScan, qrRecipient) { recipient, amount ->
-                        val current = token ?: return@TransferDialog
-                        busy = true
-                        async({ WalletApi.transfer(current, recipient, amount) }) { result ->
-                            busy = false
-                            result.onSuccess {
-                                transferOpen = false
-                                refresh(current)
-                            }.onFailure { error = it.message ?: "Перевод не выполнен" }
+                    if (transferOpen) TransferScreen(
+                        balance = wallet?.balance ?: 0L, busy = busy, initialRecipient = qrRecipient,
+                        recipients = recipientResults, searching = recipientSearching, searchError = recipientSearchError,
+                        scanQr = startQrScan,
+                        close = { transferOpen = false; qrRecipient = ""; recipientResults = emptyList() },
+                        search = { query ->
+                            val current = token
+                            if (current != null && query.trim().length >= 3) {
+                                recipientSearching = true
+                                recipientSearchError = ""
+                                async({ WalletApi.searchRecipients(current, query.trim()) }) { result ->
+                                    recipientSearching = false
+                                    result.onSuccess { recipientResults = it }
+                                        .onFailure { recipientSearchError = it.message ?: "Не удалось найти получателя" }
+                                }
+                            }
+                        },
+                        send = { recipient, amountKopecks, description ->
+                            val current = token ?: return@TransferScreen
+                            busy = true
+                            async({ WalletApi.transfer(current, recipient, amountKopecks, description) }) { result ->
+                                busy = false
+                                result.onSuccess {
+                                    transferOpen = false
+                                    qrRecipient = ""
+                                    recipientResults = emptyList()
+                                    refresh(current)
+                                }.onFailure { error = it.message ?: "Перевод не выполнен" }
+                            }
                         }
-                    }
+                    )
                     if (ownQrOpen) account?.let { currentAccount ->
                         MyQrDialog(currentAccount.id) { ownQrOpen = false }
                     }
@@ -585,42 +620,177 @@ private fun ProfileRow(icon: androidx.compose.ui.graphics.vector.ImageVector, ti
 }
 
 @Composable
-private fun TransferDialog(balance: Long, busy: Boolean, close: () -> Unit,
-                           scanQr: () -> Unit, scannedRecipient: String,
-                           send: (String, Long) -> Unit) {
-    var recipient by remember { mutableStateOf("") }
+private fun TransferScreen(
+    balance: Long, busy: Boolean, initialRecipient: String,
+    recipients: List<Recipient>, searching: Boolean, searchError: String,
+    scanQr: () -> Unit, close: () -> Unit, search: (String) -> Unit,
+    send: (String, Long, String) -> Unit
+) {
+    var query by remember { mutableStateOf(initialRecipient) }
+    var selected by remember { mutableStateOf<Recipient?>(null) }
     var amount by remember { mutableStateOf("") }
-    LaunchedEffect(scannedRecipient) {
-        if (scannedRecipient.isNotBlank()) recipient = scannedRecipient
+    var description by remember { mutableStateOf("Перевод NEON WALLET") }
+    var review by remember { mutableStateOf(false) }
+    var localError by remember { mutableStateOf("") }
+    LaunchedEffect(initialRecipient) {
+        if (initialRecipient.isNotBlank()) {
+            query = initialRecipient
+            selected = Recipient(initialRecipient, "Получатель по QR")
+        }
     }
-    val rubles = amount.toLongOrNull() ?: 0L
-    val valid = recipient.length in 6..12 && recipient.all(Char::isDigit) &&
-        rubles > 0 && rubles <= balance / 100
-    AlertDialog(onDismissRequest = close, containerColor = Panel,
-        title = { Text("Новый перевод", color = White, fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                Text("Перевод по ID NEON WALLET", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 12.dp))
-                Field("ID получателя", recipient, { recipient = it.filter(Char::isDigit).take(12) },
-                    Icons.Default.Person, KeyboardType.Number)
-                OutlinedButton(onClick = scanQr, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    shape = RoundedCornerShape(12.dp)) {
-                    Icon(Icons.Default.QrCodeScanner, null, tint = Lavender)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Сканировать QR-код", color = Lavender)
-                }
-                Spacer(Modifier.height(10.dp))
-                Field("Сумма в ₽", amount, { amount = it.filter(Char::isDigit).take(8) },
-                    Icons.Default.CurrencyRuble, KeyboardType.Number)
-                Text("Доступно: " + money(balance), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 9.dp))
-                if (rubles > balance / 100 && amount.isNotBlank()) Text("Недостаточно средств", color = Color(0xFFFF8585), fontSize = 11.sp)
+    val amountKopecks = runCatching {
+        BigDecimal(amount.replace(',', '.')).movePointRight(2).longValueExact()
+    }.getOrNull() ?: 0L
+    val valid = selected != null && amountKopecks > 0 && amountKopecks <= balance &&
+        amountKopecks <= 100_000_000L
+
+    Column(Modifier.fillMaxSize().background(Bg).navigationBarsPadding()) {
+        Row(Modifier.fillMaxWidth().background(Color(0xFF100C18)).statusBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { if (review) review = false else close() }) {
+                Icon(Icons.Default.ArrowBack, "Назад", tint = Lavender)
             }
-        },
-        confirmButton = { TextButton(enabled = valid && !busy, onClick = { send(recipient, rubles) }) {
-            Text(if (busy) "Отправка…" else "Перевести", color = Lavender)
-        } },
-        dismissButton = { TextButton(onClick = close) { Text("Отмена", color = Muted) } }
-    )
+            Column(Modifier.weight(1f)) {
+                Text(if (review) "Подтверждение" else "Новый перевод", color = White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Text("Перевод внутри NEON WALLET", color = Muted, fontSize = 11.sp)
+            }
+            BrandMark(36)
+        }
+        if (!review) {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp)) {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFF422A5D), Color(0xFF21182F), Panel)))
+                    .border(1.dp, Purple.copy(alpha = .3f), RoundedCornerShape(22.dp)).padding(18.dp)) {
+                    Text("ДОСТУПНО ДЛЯ ПЕРЕВОДА", color = Color(0xFFD4C8E5), fontSize = 10.sp, letterSpacing = 1.4.sp)
+                    Text(money(balance), color = White, fontSize = 29.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 5.dp))
+                    Text("Виртуальный баланс", color = Muted, fontSize = 11.sp)
+                }
+                Text("ПОЛУЧАТЕЛЬ", color = Muted, fontSize = 10.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 10.dp))
+                Field("ID аккаунта или имя пользователя", query, { query = it.trim().take(32); selected = null; localError = "" }, Icons.Default.Person)
+                Row(Modifier.fillMaxWidth().padding(top = 9.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Button(onClick = { search(query) }, enabled = query.trim().length >= 3 && !searching,
+                        modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Purple)) {
+                        if (searching) CircularProgressIndicator(Modifier.size(18.dp), color = White, strokeWidth = 2.dp)
+                        else Icon(Icons.Default.Search, null)
+                        Spacer(Modifier.width(7.dp)); Text("Найти")
+                    }
+                    OutlinedButton(onClick = scanQr, modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(14.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Lavender.copy(alpha = .55f))) {
+                        Icon(Icons.Default.QrCodeScanner, null, tint = Lavender); Spacer(Modifier.width(7.dp)); Text("QR-код", color = Lavender)
+                    }
+                }
+                if (searchError.isNotBlank()) Text(searchError, color = Color(0xFFFF8585), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                if (recipients.isNotEmpty()) {
+                    Text("НАЙДЕННЫЕ АККАУНТЫ", color = Muted, fontSize = 10.sp, letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 17.dp, bottom = 7.dp))
+                    recipients.forEach { recipient ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(15.dp))
+                            .background(if (selected?.id == recipient.id) Color(0xFF30203F) else Panel)
+                            .border(1.dp, if (selected?.id == recipient.id) Purple else Color.Transparent, RoundedCornerShape(15.dp))
+                            .clickable { selected = recipient; query = recipient.id }.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(42.dp).clip(CircleShape).background(Purple.copy(alpha = .2f)), contentAlignment = Alignment.Center) {
+                                Text(recipient.username.take(1).uppercase(), color = Lavender, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.width(11.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(recipient.username, color = White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text("ID " + recipient.id, color = Muted, fontSize = 10.sp)
+                            }
+                            Icon(if (selected?.id == recipient.id) Icons.Default.CheckCircle else Icons.Default.ChevronRight, null, tint = Lavender)
+                        }
+                    }
+                }
+                selected?.let { recipient ->
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF182A27)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, null, tint = Green); Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Получатель выбран", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(recipient.username + " · " + recipient.id, color = White, fontSize = 12.sp)
+                        }
+                    }
+                }
+                Text("СУММА ПЕРЕВОДА", color = Muted, fontSize = 10.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 10.dp))
+                OutlinedTextField(value = amount, onValueChange = { value ->
+                    val normalized = value.replace(',', '.')
+                    if (normalized.matches(Regex("[0-9]{0,8}(\\.[0-9]{0,2})?"))) amount = normalized
+                }, modifier = Modifier.fillMaxWidth(), label = { Text("Сумма, ₽") }, singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = White, fontSize = 25.sp, fontWeight = FontWeight.Bold),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    leadingIcon = { Icon(Icons.Default.CurrencyRuble, null, tint = Lavender) },
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = White, unfocusedTextColor = White,
+                        focusedBorderColor = Purple, unfocusedBorderColor = Color(0xFF51445F),
+                        focusedLabelColor = Lavender, unfocusedLabelColor = Muted, cursorColor = Lavender))
+                Row(Modifier.fillMaxWidth().padding(top = 9.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("100", "500", "1 000", "5 000").forEach { chip ->
+                        Surface(onClick = { amount = chip.replace(" ", "") }, shape = RoundedCornerShape(12.dp), color = Panel,
+                            modifier = Modifier.weight(1f)) {
+                            Box(Modifier.padding(vertical = 11.dp), contentAlignment = Alignment.Center) {
+                                Text(chip, color = Lavender, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+                Text("КОММЕНТАРИЙ", color = Muted, fontSize = 10.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 22.dp, bottom = 10.dp))
+                Field("За что перевод?", description, { description = it.take(140) }, Icons.Default.Edit)
+                if (amount.isNotBlank() && amountKopecks > balance) Text("Недостаточно средств на балансе", color = Color(0xFFFF8585), fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 9.dp))
+                if (localError.isNotBlank()) Text(localError, color = Color(0xFFFF8585), fontSize = 12.sp)
+                Text("Виртуальные средства переводятся только между аккаунтами NEON WALLET.", color = Muted, fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 18.dp))
+            }
+            Column(Modifier.fillMaxWidth().background(Color(0xFF100C18)).padding(16.dp)) {
+                Button(onClick = {
+                    if (selected == null) localError = "Сначала найди и выбери получателя."
+                    else if (amountKopecks <= 0) localError = "Укажи сумму перевода."
+                    else if (amountKopecks > balance) localError = "Недостаточно виртуальных средств."
+                    else review = true
+                }, enabled = valid && !busy, modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Purple)) {
+                    Text("Продолжить", fontWeight = FontWeight.Bold, fontSize = 15.sp); Spacer(Modifier.width(8.dp)); Icon(Icons.Default.ArrowForward, null)
+                }
+            }
+        } else {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.padding(top = 22.dp).size(82.dp).clip(CircleShape).background(Purple.copy(alpha = .17f)),
+                    contentAlignment = Alignment.Center) { Icon(Icons.Default.Send, null, tint = Lavender, modifier = Modifier.size(36.dp)) }
+                Text("Проверь перевод", color = White, fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 17.dp))
+                Text("Перед отправкой убедись, что всё верно", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                Text(money(amountKopecks), color = White, fontSize = 36.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 28.dp, bottom = 20.dp))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Panel).padding(17.dp)) {
+                    ReviewLine("Получатель", selected?.username ?: "—")
+                    ReviewLine("ID аккаунта", selected?.id ?: "—")
+                    Divider(color = Color(0xFF34283F), modifier = Modifier.padding(vertical = 12.dp))
+                    ReviewLine("Комментарий", description.ifBlank { "Перевод NEON WALLET" })
+                    ReviewLine("Комиссия", "0 ₽")
+                    ReviewLine("Итого", money(amountKopecks), true)
+                }
+                Text("После подтверждения виртуальные средства будут списаны с твоего баланса.", color = Muted, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 18.dp))
+            }
+            Column(Modifier.fillMaxWidth().background(Color(0xFF100C18)).padding(16.dp)) {
+                Button(onClick = { selected?.let { send(it.id, amountKopecks, description) } }, enabled = valid && !busy,
+                    modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple)) {
+                    if (busy) CircularProgressIndicator(Modifier.size(19.dp), color = White, strokeWidth = 2.dp)
+                    else { Text("Подтвердить перевод", fontWeight = FontWeight.Bold, fontSize = 15.sp); Spacer(Modifier.width(8.dp)); Icon(Icons.Default.Check, null) }
+                }
+                TextButton(onClick = { review = false }, modifier = Modifier.fillMaxWidth()) { Text("Изменить данные", color = Lavender) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReviewLine(label: String, value: String, strong: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        Text(value, color = if (strong) Lavender else White, fontSize = 12.sp, fontWeight = if (strong) FontWeight.Bold else FontWeight.Medium)
+    }
 }
 
 @Composable
