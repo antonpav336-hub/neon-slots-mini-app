@@ -390,16 +390,9 @@ button:focus-visible{outline:2px solid var(--ice);outline-offset:3px}
 <div class="section-title">ИСТОРИЯ ОТКРЫТИЙ <small>Твои последние дропы</small></div><section class="panel" id="caseHistory"><div class="muted" style="font-size:11px">Загрузка истории…</div></section>
 </div>
 <div class="game-panel" id="game-slots" data-game-panel="slots">
-<section class="slot-hub">
-<div class="slot-hero"><div class="kicker">✦ NEON ORIGINAL SLOTS</div><h2>THREE WORLDS. ONE BALANCE.</h2><p>Выбирай автомат, ставку и крути. Списание и результат подтверждает сервер.</p></div>
-<div class="slot-picker"><button class="slot-choice active" data-slot-choice="olympus"><i>⚡</i>OLYMPUS</button><button class="slot-choice" data-slot-choice="sweet"><i>🍭</i>SWEET</button><button class="slot-choice" data-slot-choice="sugar"><i>🍩</i>SUGAR RUSH</button></div>
-<div class="slot-machine"><div class="slot-machine-title"><span id="slotName">OLYMPUS</span><span class="live">SERVER RNG</span></div>
-<div class="slot-reels"><div class="slot-reel" id="slotReel0">⚡</div><div class="slot-reel" id="slotReel1">👑</div><div class="slot-reel" id="slotReel2">🏛️</div></div>
-<div class="slot-bet-line"><label for="slotBet">СТАВКА В ИГРОВЫХ ⭐</label><span>Баланс: <b id="slotBalance">—</b></span></div>
-<input class="slot-bet-input" id="slotBet" type="number" min="1" step="1" value="10" inputmode="numeric">
-<button class="slot-spin" id="slotSpin">🎰 КРУТИТЬ</button><div class="slot-message" id="slotMessage">Три одинаковых символа — выплата по множителю.</div></div>
-<div class="case-odds panel" style="margin-top:14px"><div class="case-odds-title">ПРАВИЛА ВЫПЛАТ</div><p>Три одинаковых символа дают множитель от ×1,5 до ×12. Если комбинации нет — ставка проиграна. Точный результат формируется на сервере до анимации.</p></div>
-<div class="section-title">ИСТОРИЯ СЛОТОВ <small>Последние вращения</small></div><section class="panel slot-history" id="slotHistory"><div class="muted" style="font-size:11px">Пока нет вращений</div></section>
+<section class="slot-hub" style="padding:0;border:0;background:transparent;box-shadow:none">
+<iframe src="/static/neon-worlds.html" title="NEON ORIGINALS — demo slots" loading="eager" style="display:block;width:calc(100% + 24px);height:1080px;margin:0 -12px;border:0;border-radius:18px;background:#090d1b" allow="autoplay"></iframe>
+<div hidden><span id="slotName">OLYMPUS</span><span id="slotBalance"></span><input id="slotBet" value="10"><button id="slotSpin"></button><span id="slotMessage"></span><span id="slotHistory"></span><span id="slotReel0"></span><span id="slotReel1"></span><span id="slotReel2"></span></div>
 </section></div>
 <div class="game-panel" id="game-mines" data-game-panel="mines">
 <section class="mines-card">
