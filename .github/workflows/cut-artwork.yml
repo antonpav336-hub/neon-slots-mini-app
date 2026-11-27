@@ -1,0 +1,28 @@
+name: Cut artwork sheets into transparent PNGs
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/cut_artwork.py"
+      - "179574*.jpg"
+      - ".github/workflows/cut-artwork.yml"
+permissions:
+  contents: write
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install Pillow
+      - run: python scripts/cut_artwork.py
+      - name: Commit generated PNG assets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets
+          git diff --cached --quiet || (git commit -m "Generate transparent individual artwork PNGs" && git push)
