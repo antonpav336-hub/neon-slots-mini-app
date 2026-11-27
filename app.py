@@ -929,7 +929,7 @@ async def spin(body: Amount, request: Request):
         mult = GAME_MATH_CONFIG["classic_slots"]["pair_multiplier"]
     else:
         mult = 0
-    payout = bet * mult
+    payout = int(bet * mult * GAME_MATH_CONFIG["classic_slots"]["payout_factor"])
     with connect() as con:
         con.execute("BEGIN IMMEDIATE")
         row = con.execute("SELECT bal FROM users WHERE id=?", (uid,)).fetchone()
