@@ -268,6 +268,300 @@ SLOT_CONFIG = {
     "sugar": {"name": "SUGAR RUSH", "symbols": ["🍩", "🧁", "🍫", "🍬", "🍒", "🍓"], "multipliers": {"🍩": 12, "🧁": 8, "🍫": 5, "🍬": 3, "🍒": 2, "🍓": 1.5}},
 }
 
+
+
+# Server-authoritative cascade slots. Client receives animation frames only; all RNG,
+# payout calculation and balance settlement remain inside this transaction.
+with connect() as _con:
+    _con.executescript("""
+    CREATE TABLE IF NOT EXISTS slot_sessions(
+        uid INTEGER NOT NULL, game_id TEXT NOT NULL,
+        bonus INTEGER NOT NULL DEFAULT 0, bonus_mode INTEGER NOT NULL DEFAULT 0,
+        global_mult INTEGER NOT NULL DEFAULT 0, cell_hits TEXT NOT NULL DEFAULT '[]',
+        PRIMARY KEY(uid, game_id)
+    );
+    CREATE TABLE IF NOT EXISTS slot_round_requests(
+        request_id TEXT PRIMARY KEY, uid INTEGER NOT NULL,
+        response TEXT NOT NULL, created_at INTEGER NOT NULL
+    );
+    """)
+
+_SLOT_GAMES = {
+    "olympus": {"name":"THUNDER GOD","cols":6,"rows":5,"scatter":"⚡",
+        "symbols":["🔵","🟢","🟡","🟣","🔴","🏆","💍","⌛","👑"],
+        "high":["🏆","💍","⌛","👑"],"mult_count":15},
+    "sweet": {"name":"SWEET BLAST","cols":6,"rows":5,"scatter":"🍭",
+        "symbols":["🍌","🍇","🍉","🫐","🍎","🟦","🟩","🟪","❤️"],
+        "high":["🟦","🟩","🟪","❤️"],"mult_count":13},
+    "sugar": {"name":"SUGAR RUSH","cols":7,"rows":7,"scatter":"🚀",
+        "symbols":["🐻","🧸","🐻‍❄️","⭐","🫘","🧡","🍡"],
+        "high":["⭐","🫘","🧡","🍡"],"mult_count":13},
+}
+_SLOT_MULTS = [2,3,4,5,6,8,10,12,15,20,25,50,100,250,500]
+_SLOT_PAYOUT_FACTOR = 0.75
+
+def _slot_weighted_symbol(game):
+    return secrets.choice(game["symbols"])
+
+def _slot_board(game):
+    return [[_slot_weighted_symbol(game) for _ in range(game["cols"])]
+            for _ in range(game["rows"])]
+
+def _slot_scatter_count(board, scatter):
+    return sum(1 for row in board for symbol in row if symbol == scatter)
+
+def _slot_place_scatters(board, game, count):
+    cells = list(range(game["rows"] * game["cols"]))
+    secrets.SystemRandom().shuffle(cells)
+    for idx in cells[:min(count, len(cells))]:
+        board[idx // game["cols"]][idx % game["cols"]] = game["scatter"]
+
+def _slot_find_anywhere(board, game):
+    positions = {}
+    for idx, symbol in enumerate(sum(board, [])):
+        if symbol == game["scatter"]:
+            continue
+        positions.setdefault(symbol, []).append(idx)
+    return [{"symbol":s,"ids":ids} for s,ids in positions.items() if len(ids) >= 8]
+
+def _slot_find_clusters(board, game):
+    rows, cols = game["rows"], game["cols"]
+    seen, groups = set(), []
+    for row in range(rows):
+        for col in range(cols):
+            symbol = board[row][col]
+            start = row * cols + col
+            if symbol == game["scatter"] or start in seen:
+                continue
+            queue, group = [start], []
+            seen.add(start)
+            while queue:
+                idx = queue.pop()
+                rr, cc = divmod(idx, cols)
+                group.append(idx)
+                for nr,nc in ((rr-1,cc),(rr+1,cc),(rr,cc-1),(rr,cc+1)):
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        ni = nr * cols + nc
+                        if ni not in seen and board[nr][nc] == symbol:
+                            seen.add(ni)
+                            queue.append(ni)
+            if len(group) >= 5:
+                groups.append({"symbol":symbol,"ids":group})
+    return groups
+
+def _slot_symbol_pay(symbol, count, bet, game):
+    high = symbol in game["high"]
+    if game is _SLOT_GAMES["sugar"]:
+        base = .48 if high else .24
+        return bet * base * max(1, count / 5) ** (1.7 if high else 1.4)
+    if count >= 12:
+        return bet * ((12 + min(38,(count-12)*4)) if high
+                      else (2 + min(8,(count-12)*.8))
+        )
+    return bet * ((1.5 + max(0,count-8)*1.6) if high
+                  else (.25 + max(0,count-8)*.25))
+
+def _slot_pick_mult(game):
+    weights = [22,18,15,12,10,7,5,4,2.5,1.8,1.2,.8,.4,.2,.1][:game["mult_count"]]
+    return secrets.SystemRandom().choices(_SLOT_MULTS[:game["mult_count"]],weights=weights,k=1)[0]
+
+def _slot_gravity(board, remove, game):
+    cols, rows = game["cols"], game["rows"]
+    removed = set(remove)
+    next_board = [[None for _ in range(cols)] for _ in range(rows)]
+    for col in range(cols):
+        kept = [board[row][col] for row in range(rows-1,-1,-1)
+                if row*cols+col not in removed]
+        while len(kept) < rows:
+            kept.append(_slot_weighted_symbol(game))
+        for row in range(rows-1,-1,-1):
+            next_board[row][col] = kept[rows-1-row]
+    return next_board
+
+def _slot_scatter_spins(game_id, count):
+    if game_id == "sugar":
+        return {3:10,4:12,5:15,6:20,7:30}.get(min(count,7),30)
+    return 10 if game_id == "sweet" else 15
+
+def _slot_simulate(game_id, game, bet, ante, buy, session):
+    bonus = int(session["bonus"])
+    bonus_mode = bool(session["bonus_mode"])
+    global_mult = int(session["global_mult"])
+    cell_hits = json.loads(session["cell_hits"] or "[]")
+    if bonus_mode and bonus <= 0:
+        bonus_mode, global_mult, cell_hits = False, 0, []
+    is_free = bonus_mode and bonus > 0
+    if is_free:
+        bonus -= 1
+    if game_id == "sugar":
+        if not bonus_mode or not cell_hits:
+            cell_hits = [0] * (game["rows"] * game["cols"])
+    else:
+        cell_hits = []
+
+    board = _slot_board(game)
+    if buy:
+        target = secrets.randbelow(5) + (3 if game_id == "sugar" else 4)
+        _slot_place_scatters(board, game, target)
+    elif secrets.randbelow(10000) < (1300 if ante else 650):
+        low = 3 if game_id == "sugar" else 4
+        high = 7 if game_id == "sugar" else 6
+        _slot_place_scatters(board, game, low + secrets.randbelow(high-low+1))
+
+    initial_scatter = _slot_scatter_count(board, game["scatter"])
+    steps = [{"board":[row[:] for row in board],"remove":[],"spots":cell_hits[:],"cascade":0}]
+    win_total, all_mult, cascades = 0.0, 0, 0
+    spin_mults = []
+    while cascades < 12:
+        groups = (_slot_find_clusters(board,game) if game_id == "sugar"
+                  else _slot_find_anywhere(board,game))
+        if not groups:
+            break
+        remove, step_win = [], 0.0
+        for group in groups:
+            ids = group["ids"]
+            if game_id == "sugar":
+                group_mult = 1
+                for idx in ids:
+                    if cell_hits[idx] > 0:
+                        group_mult += 2 ** (cell_hits[idx]-1)
+                    cell_hits[idx] = min(8,cell_hits[idx]+1)
+                step_win += _slot_symbol_pay(group["symbol"],len(ids),bet,game) * group_mult
+            else:
+                step_win += _slot_symbol_pay(group["symbol"],len(ids),bet,game)
+            remove.extend(ids)
+        win_total += step_win
+        unique_remove = sorted(set(remove))
+        steps.append({"board":[row[:] for row in board],"remove":unique_remove,
+                      "spots":cell_hits[:],"cascade":cascades+1})
+        if game_id == "olympus" and secrets.randbelow(10000) < 4800:
+            spin_mults.append(_slot_pick_mult(game))
+        elif game_id == "sweet" and bonus_mode and secrets.randbelow(10000) < 4200:
+            spin_mults.append(_slot_pick_mult(game))
+        board = _slot_gravity(board,unique_remove,game)
+        cascades += 1
+        steps.append({"board":[row[:] for row in board],"remove":[],
+                      "spots":cell_hits[:],"cascade":cascades,"drop":True})
+    scatter_pay = 0
+    if game_id != "sugar" and initial_scatter >= 4:
+        scatter_pay = bet * {4:3,5:5}.get(min(initial_scatter,6),100)
+    win_total += scatter_pay
+    if game_id == "olympus" and win_total > 0:
+        if bonus_mode:
+            if spin_mults:
+                global_mult += sum(spin_mults)
+            all_mult = global_mult
+            if global_mult:
+                win_total *= global_mult
+        elif spin_mults:
+            all_mult = sum(spin_mults)
+            win_total *= all_mult
+    elif game_id == "sweet" and bonus_mode and spin_mults and win_total > 0:
+        all_mult = sum(spin_mults)
+        win_total *= all_mult
+    elif game_id == "sugar" and bonus_mode and win_total > 0:
+        all_mult = sum(2 ** (hit-1) for hit in cell_hits if hit > 1)
+
+    # Lower game return as requested; this factor is applied server-side only.
+    payout = max(0, int(win_total * _SLOT_PAYOUT_FACTOR))
+    if initial_scatter >= 4 and not bonus_mode:
+        bonus = _slot_scatter_spins(game_id,initial_scatter)
+        bonus_mode = True
+        if game_id != "olympus":
+            global_mult = 0
+    elif bonus_mode and initial_scatter >= 3:
+        extra = _slot_scatter_spins(game_id,initial_scatter) if game_id == "sugar" else 5
+        bonus += extra
+    elif not bonus_mode and game_id == "sugar" and initial_scatter >= 3:
+        bonus = _slot_scatter_spins(game_id,initial_scatter)
+        bonus_mode = True
+    if bonus_mode and bonus == 0:
+        bonus_mode, global_mult = False, 0
+        if game_id == "sugar":
+            cell_hits = []
+    return {
+        "steps":steps,"final_board":board,"payout":payout,
+        "multiplier":all_mult,"bonus":bonus,"bonus_mode":bonus_mode,
+        "global_mult":global_mult,"cell_hits":cell_hits,
+        "scatters":initial_scatter,"cascades":cascades,
+        "is_free":is_free
+    }
+
+@app.post("/api/slots/play")
+async def slots_play(body: dict, request: Request):
+    user = await auth(request)
+    uid = int(user["id"])
+    game_id = body.get("game_id")
+    game = _SLOT_GAMES.get(game_id) if isinstance(game_id,str) else None
+    bet = body.get("bet")
+    ante = body.get("ante",False)
+    buy = body.get("buy",False)
+    request_id = body.get("request_id")
+    if not game:
+        raise HTTPException(400,"Неизвестный слот.")
+    if isinstance(bet,bool) or not isinstance(bet,int) or bet < 1 or bet > 1000:
+        raise HTTPException(400,"Ставка должна быть от 1 до 1000 ⭐.")
+    if not isinstance(ante,bool) or not isinstance(buy,bool):
+        raise HTTPException(400,"Некорректные параметры раунда.")
+    if not isinstance(request_id,str) or not 12 <= len(request_id) <= 80:
+        raise HTTPException(400,"Не удалось создать идентификатор раунда.")
+    ensure_user(user)
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        previous = con.execute("SELECT uid,response FROM slot_round_requests WHERE request_id=?",(request_id,)).fetchone()
+        if previous:
+            if int(previous["uid"]) != uid:
+                raise HTTPException(409,"Идентификатор раунда уже использован.")
+            return json.loads(previous["response"])
+        row = con.execute("SELECT bal FROM users WHERE id=?",(uid,)).fetchone()
+        balance = int(row["bal"]) if row else 0
+        session = con.execute("SELECT * FROM slot_sessions WHERE uid=? AND game_id=?",(uid,game_id)).fetchone()
+        if session is None:
+            session = {"bonus":0,"bonus_mode":0,"global_mult":0,"cell_hits":"[]"}
+        if buy and bool(session["bonus_mode"]) and int(session["bonus"]) > 0:
+            raise HTTPException(409,"Сначала заверши текущую бонусную игру.")
+        free_spin = bool(session["bonus_mode"]) and int(session["bonus"]) > 0
+        cost = 0 if free_spin else (bet*100 if buy else ((bet*5+3)//4 if ante else bet))
+        if balance < cost:
+            raise HTTPException(400,"Недостаточно звёзд")
+        result = _slot_simulate(game_id,game,bet,ante,buy,session)
+        new_balance = balance - cost + int(result["payout"])
+        con.execute("UPDATE users SET bal=? WHERE id=?",(new_balance,uid))
+        con.execute("""INSERT INTO slot_sessions(uid,game_id,bonus,bonus_mode,global_mult,cell_hits)
+            VALUES(?,?,?,?,?,?) ON CONFLICT(uid,game_id) DO UPDATE SET
+            bonus=excluded.bonus,bonus_mode=excluded.bonus_mode,
+            global_mult=excluded.global_mult,cell_hits=excluded.cell_hits""",
+            (uid,game_id,result["bonus"],int(result["bonus_mode"]),result["global_mult"],json.dumps(result["cell_hits"])))
+        symbols = " ".join(sum(result["final_board"],[]))
+        con.execute("""INSERT INTO slot_spins(uid,game_id,game_name,bet,symbols,multiplier,payout,created_at)
+            VALUES(?,?,?,?,?,?,?,?)""",
+            (uid,game_id,game["name"],cost,symbols,result["multiplier"],result["payout"],int(time.time())))
+        response = {
+            "ok":True,"game_id":game_id,"bet":bet,"cost":cost,"balance":new_balance,
+            "payout":int(result["payout"]),"multiplier":result["multiplier"],
+            "bonus":result["bonus"],"bonus_mode":result["bonus_mode"],
+            "global_mult":result["global_mult"],"scatters":result["scatters"],
+            "cascades":result["cascades"],"is_free":result["is_free"],
+            "steps":result["steps"],"final_board":result["final_board"]
+        }
+        con.execute("INSERT INTO slot_round_requests(request_id,uid,response,created_at) VALUES(?,?,?,?)",
+                    (request_id,uid,json.dumps(response,ensure_ascii=False),int(time.time())))
+    return response
+
+@app.get("/api/slots/state/{game_id}")
+async def slots_state(game_id: str, request: Request):
+    user = await auth(request)
+    if game_id not in _SLOT_GAMES:
+        raise HTTPException(400,"Неизвестный слот.")
+    with connect() as con:
+        row = con.execute("SELECT bal FROM users WHERE id=?",(int(user["id"]),)).fetchone()
+        session = con.execute("SELECT bonus,bonus_mode,global_mult FROM slot_sessions WHERE uid=? AND game_id=?",
+                              (int(user["id"]),game_id)).fetchone()
+    return {"balance":int(row["bal"]) if row else 0,
+            "bonus":int(session["bonus"]) if session else 0,
+            "bonus_mode":bool(session["bonus_mode"]) if session else False,
+            "global_mult":int(session["global_mult"]) if session else 0}
+
 @app.get("/api/slots/history")
 async def slots_history(request: Request):
     user = await auth(request)
