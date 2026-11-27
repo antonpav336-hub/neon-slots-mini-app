@@ -263,9 +263,9 @@ CASE_CONFIG = {
 
 
 SLOT_CONFIG = {
-    "olympus": {"name": "OLYMPUS", "symbols": ["⚡", "👑", "🏛️", "💎", "🍇", "🛡️"], "multipliers": {"⚡": 12, "👑": 7, "🏛️": 5, "💎": 3, "🍇": 2, "🛡️": 1.5}},
-    "sweet": {"name": "SWEET BONANZA", "symbols": ["🍭", "🍬", "🍇", "🍉", "🍌", "🍓"], "multipliers": {"🍭": 10, "🍬": 7, "🍇": 5, "🍉": 3, "🍌": 2, "🍓": 1.5}},
-    "sugar": {"name": "SUGAR RUSH", "symbols": ["🍩", "🧁", "🍫", "🍬", "🍒", "🍓"], "multipliers": {"🍩": 12, "🧁": 8, "🍫": 5, "🍬": 3, "🍒": 2, "🍓": 1.5}},
+    "olympus": {"name": "OLYMPUS", "symbols": ["⚡", "👑", "🏛️", "💎", "🍇", "🛡️"], "weights": [4, 8, 12, 18, 26, 32], "multipliers": {"⚡": 12, "👑": 7, "🏛️": 5, "💎": 3, "🍇": 2, "🛡️": 1.5}},
+    "sweet": {"name": "SWEET BONANZA", "symbols": ["🍭", "🍬", "🍇", "🍉", "🍌", "🍓"], "weights": [4, 8, 12, 18, 26, 32], "multipliers": {"🍭": 10, "🍬": 7, "🍇": 5, "🍉": 3, "🍌": 2, "🍓": 1.5}},
+    "sugar": {"name": "SUGAR RUSH", "symbols": ["🍩", "🧁", "🍫", "🍬", "🍒", "🍓"], "weights": [4, 8, 12, 18, 26, 32], "multipliers": {"🍩": 12, "🧁": 8, "🍫": 5, "🍬": 3, "🍒": 2, "🍓": 1.5}},
 }
 
 
@@ -312,7 +312,7 @@ GAME_MATH_CONFIG = {
         "outcomes": [(1500, 0.0), (4500, 0.5), (7500, 0.8), (9200, 1.0), (9900, 1.5), (10000, 5.0)]
     },
     "mines": {"cashout_rtp": 0.90},
-    "classic_slots": {"pair_multiplier": 0.7, "triple_multiplier": 3.0, "jackpot_multiplier": 10.0}
+    "classic_slots": {"pair_multiplier": 0.7, "triple_multiplier": 3.0, "jackpot_multiplier": 10.0, "payout_factor": 0.85}
 }
 _SLOT_MULTS = [2,3,4,5,6,8,10,12,15,20,25,50,100,250,500]
 _SLOT_PAYOUT_FACTOR = GAME_MATH_CONFIG["slots"]["payout_factor"]
@@ -603,9 +603,9 @@ async def slots_spin(body: dict, request: Request):
     if isinstance(bet, bool) or not isinstance(bet, int) or bet < 1 or bet > MAX_BET:
         raise HTTPException(400, f"Ставка должна быть от 1 до {MAX_BET} ⭐.")
     ensure_user(user)
-    symbols = [secrets.choice(config["symbols"]) for _ in range(3)]
+    symbols = [secrets.SystemRandom().choices(config["symbols"], weights=config["weights"], k=1)[0] for _ in range(3)]
     multiplier = config["multipliers"].get(symbols[0], 0) if symbols.count(symbols[0]) == 3 else 0
-    payout = int(bet * multiplier)
+    payout = int(bet * multiplier * GAME_MATH_CONFIG["classic_slots"]["payout_factor"])
     now = int(time.time())
     with connect() as con:
         con.execute("BEGIN IMMEDIATE")
@@ -852,7 +852,7 @@ def mines_multiplier(mine_count: int, safe_picks: int) -> float:
     probability = 1.0
     for i in range(safe_picks):
         probability *= (25 - mine_count - i) / (25 - i)
-    return round(0.97 / probability, 4)
+    return round(GAME_MATH_CONFIG["mines"]["cashout_rtp"] / probability, 4)
 
 @app.post("/api/mines/pick")
 async def mines_pick(body: dict, request: Request):
