@@ -379,14 +379,10 @@ body{background:radial-gradient(ellipse at 12% 0%,#2d3d7655,transparent 40%),rad
 @media(min-width:680px){.wrap{max-width:760px;padding-top:28px}.actions{grid-template-columns:repeat(3,1fr)}.cases-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.page-heading h2{font-size:38px}.slot-card,.miner-card,.mines-card{padding:23px}}
 @media(max-width:390px){.wrap{padding-left:11px;padding-right:11px}.balance{padding:13px 14px}.bal-num{font-size:25px}.actions{gap:8px}.action{padding:13px 11px;min-height:104px}.cases-grid{gap:8px}.case-card{padding:11px}.mines-board{gap:6px}.mine-cell{border-radius:10px}}
 
-/* Uploaded case and reward artwork */
-.case-big-icon.starter{background-position:0% 0%}.case-big-icon.neon{background-position:50% 0%}.case-big-icon.royal{background-position:100% 0%}.case-big-icon.crystal{background-position:0% 100%}.case-big-icon.cosmic,.case-big-icon.legend{background-position:50% 100%}
-
-.case-card .case-art{font-size:0;background-repeat:no-repeat;background-size:300% 200%;background-image:url('https://raw.githubusercontent.com/antonpav336-hub/neon-slots-mini-app/main/1795742892974.jpg');mix-blend-mode:screen;filter:drop-shadow(0 5px 12px #0009)}
-.case-card.starter .case-art{background-position:0% 0%}.case-card.neon .case-art{background-position:50% 0%}.case-card.royal .case-art{background-position:100% 0%}.case-card.crystal .case-art{background-position:0% 100%}.case-card.cosmic .case-art{background-position:50% 100%}.case-card.legend .case-art{background-position:50% 100%;filter:hue-rotate(24deg) drop-shadow(0 5px 14px #c17aff99)}
-.case-big-icon{font-size:0!important;width:112px;height:100px;margin:auto;background-image:url('https://raw.githubusercontent.com/antonpav336-hub/neon-slots-mini-app/main/1795742892974.jpg');background-repeat:no-repeat;background-size:300% 200%;mix-blend-mode:screen;filter:drop-shadow(0 0 22px #a77aff88)}
-.case-reel-item i{display:block;width:42px;height:42px;font-size:0;background-image:url('https://raw.githubusercontent.com/antonpav336-hub/neon-slots-mini-app/main/1795742902056.jpg');background-repeat:no-repeat;background-size:300% 200%;mix-blend-mode:screen}
-.case-reel-item i[data-reward="star"]{background-position:0% 0%}.case-reel-item i[data-reward="coin"]{background-position:50% 0%}.case-reel-item i[data-reward="crystal"]{background-position:100% 0%}.case-reel-item i[data-reward="diamond"]{background-position:0% 100%}.case-reel-item i[data-reward="wallet"]{background-position:50% 100%}.case-reel-item i[data-reward="refresh"]{background-position:100% 100%}
+/* Individual transparent PNG artwork */
+.case-card .case-art{display:block;width:100%;height:79px;object-fit:contain;object-position:center;margin:0 auto;filter:drop-shadow(0 5px 12px #0009);animation:caseFloat 2.7s ease-in-out infinite}
+.case-big-icon{display:block;position:relative;width:112px;height:100px;object-fit:contain;object-position:center;margin:auto;filter:drop-shadow(0 0 22px #a77aff88);animation:caseShake .34s linear infinite}
+.case-reel-item img{display:block;width:42px;height:42px;object-fit:contain;object-position:center;filter:drop-shadow(0 0 8px #8d8cff55)}
 </style></head>
 <body><div id="intro" aria-label="Загрузка NEON MINES"><div class="intro-content"><div class="intro-mascot">💣</div><div class="intro-title">NEON MINES</div><div class="intro-sub">Добро пожаловать в игру</div><div class="intro-loader"><i></i></div></div></div><main class="wrap"><header class="top"><div class="brand">NEON<span>•</span>MINES</div><div class="avatar" id="avatar">N</div></header>
 <section class="page active" id="page-home"><div class="hero hero-premium"><div class="hero-kicker"><i></i> THE NEON ARENA <span>• LIVE</span></div><div class="hero-stage" aria-hidden="true"><div class="hero-orbit orbit-a"></div><div class="hero-orbit orbit-b"></div><div class="hero-core"><div class="core-glyph">💎</div><div class="core-glint"></div></div><span class="float-gem gem-a">✦</span><span class="float-gem gem-b">◆</span><span class="float-gem gem-c">✧</span></div><h1>PLAY <em>BEYOND</em><br>THE RISK.</h1><p>Твоя удача. Твои правила. Забирай больше.</p><div class="hero-pills"><span>⚡ МГНОВЕННАЯ ИГРА</span><span>✦ TELEGRAM STARS</span></div></div><section class="balance"><div><div class="bal-label">ТВОЙ БАЛАНС</div><div class="bal-num" id="balance">— <span style="font-size:12px;color:#b9bbd2">⭐</span></div></div><div class="coin">⭐</div></section><div class="home-shortcuts"><button class="shortcut primary" data-go="games"><span>💣</span><b>Играть в Минёр</b><small>Открывай клетки и забирай выигрыш</small></button><div class="shortcut-row"><button class="shortcut" data-go="deposit"><span>⭐</span><b>Пополнить</b><small>Telegram Stars</small></button><button class="shortcut" data-go="withdraw"><span>💸</span><b>Вывести</b><small>Заявка на вывод</small></button></div></div><div class="home-caption">ТВОЯ ИГРОВАЯ ЗОНА <span>NEON MINES</span></div></section><section class="page" id="page-games">
@@ -399,16 +395,16 @@ body{background:radial-gradient(ellipse at 12% 0%,#2d3d7655,transparent 40%),rad
   <div class="cases-hero-stats"><span>6 УРОВНЕЙ КЕЙСОВ</span><span>•</span><span>СЛУЧАЙНЫЙ ДРОП</span></div>
 </section>
 <div class="cases-grid">
-  <article class="case-card starter"><div class="case-rarity">COMMON DROP</div><div class="case-art"></div><h3>STARTER</h3><p>Первый шаг в NEON DROP</p><div class="case-price">50 <small>⭐</small></div><button class="case-open-btn" data-case="starter">ОТКРЫТЬ КЕЙС</button></article>
-  <article class="case-card neon"><div class="case-rarity">RARE DROP</div><div class="case-art"></div><h3>NEON</h3><p>Холодное сияние наград</p><div class="case-price">100 <small>⭐</small></div><button class="case-open-btn" data-case="neon">ОТКРЫТЬ КЕЙС</button></article>
-  <article class="case-card crystal"><div class="case-rarity">EPIC DROP</div><div class="case-art"></div><h3>CRYSTAL</h3><p>Кристальный шанс на дроп</p><div class="case-price">250 <small>⭐</small></div><button class="case-open-btn" data-case="crystal">ОТКРЫТЬ КЕЙС</button></article>
-  <article class="case-card royal"><div class="case-rarity">ELITE DROP</div><div class="case-art"></div><h3>ROYAL</h3><p>Королевская коллекция</p><div class="case-price">500 <small>⭐</small></div><button class="case-open-btn" data-case="royal">ОТКРЫТЬ КЕЙС</button></article>
-  <article class="case-card legend"><div class="case-rarity">LEGENDARY DROP</div><div class="case-art"></div><h3>LEGEND</h3><p>Для охотников за редкостью</p><div class="case-price">1 000 <small>⭐</small></div><button class="case-open-btn" data-case="legend">ОТКРЫТЬ КЕЙС</button></article>
-  <article class="case-card cosmic"><div class="case-rarity">MYTHIC DROP</div><div class="case-art"></div><h3>COSMIC</h3><p>Максимальный уровень дропа</p><div class="case-price">2 500 <small>⭐</small></div><button class="case-open-btn" data-case="cosmic">ОТКРЫТЬ КЕЙС</button></article>
+  <article class="case-card starter"><div class="case-rarity">COMMON DROP</div><img class="case-art" src="/assets/cases/r0c0.png" alt="" loading="lazy" decoding="async"><h3>STARTER</h3><p>Первый шаг в NEON DROP</p><div class="case-price">50 <small>⭐</small></div><button class="case-open-btn" data-case="starter">ОТКРЫТЬ КЕЙС</button></article>
+  <article class="case-card neon"><div class="case-rarity">RARE DROP</div><img class="case-art" src="/assets/cases/r0c1.png" alt="" loading="lazy" decoding="async"><h3>NEON</h3><p>Холодное сияние наград</p><div class="case-price">100 <small>⭐</small></div><button class="case-open-btn" data-case="neon">ОТКРЫТЬ КЕЙС</button></article>
+  <article class="case-card crystal"><div class="case-rarity">EPIC DROP</div><img class="case-art" src="/assets/cases/r0c2.png" alt="" loading="lazy" decoding="async"><h3>CRYSTAL</h3><p>Кристальный шанс на дроп</p><div class="case-price">250 <small>⭐</small></div><button class="case-open-btn" data-case="crystal">ОТКРЫТЬ КЕЙС</button></article>
+  <article class="case-card royal"><div class="case-rarity">ELITE DROP</div><img class="case-art" src="/assets/cases/r1c0.png" alt="" loading="lazy" decoding="async"><h3>ROYAL</h3><p>Королевская коллекция</p><div class="case-price">500 <small>⭐</small></div><button class="case-open-btn" data-case="royal">ОТКРЫТЬ КЕЙС</button></article>
+  <article class="case-card legend"><div class="case-rarity">LEGENDARY DROP</div><img class="case-art" src="/assets/cases/r1c1.png" alt="" loading="lazy" decoding="async"><h3>LEGEND</h3><p>Для охотников за редкостью</p><div class="case-price">1 000 <small>⭐</small></div><button class="case-open-btn" data-case="legend">ОТКРЫТЬ КЕЙС</button></article>
+  <article class="case-card cosmic"><div class="case-rarity">MYTHIC DROP</div><img class="case-art" src="/assets/cases/r1c2.png" alt="" loading="lazy" decoding="async"><h3>COSMIC</h3><p>Максимальный уровень дропа</p><div class="case-price">2 500 <small>⭐</small></div><button class="case-open-btn" data-case="cosmic">ОТКРЫТЬ КЕЙС</button></article>
 </div>
 <section class="case-opening" id="caseOpening" hidden>
   <div class="case-opening-top"><span id="caseOpeningName">NEON CASE</span><span class="case-live-dot">● DROP IN PROGRESS</span></div>
-  <div class="case-reveal-scene" id="caseRevealScene"><div class="case-aura"></div><div class="case-big-icon" id="caseBigIcon">📦</div><div class="case-sparkles">✦　✧　✦</div></div>
+  <div class="case-reveal-scene" id="caseRevealScene"><div class="case-aura"></div><img class="case-big-icon" id="caseBigIcon" src="/assets/cases/r0c0.png" alt=""><div class="case-sparkles">✦　✧　✦</div></div>
   <div class="case-reel" id="caseReel"><div class="case-reel-marker"></div><div class="case-reel-track" id="caseReelTrack"></div></div>
   <div class="case-result" id="caseResult">Подготавливаем открытие…</div>
   <button class="case-again" id="caseAgain" hidden>ОТКРЫТЬ ЕЩЁ</button>
@@ -498,6 +494,7 @@ async function loadLeaderboard(){try{const d=await api('/api/leaderboard');$('le
 function openModal(mode){state.mode=mode;$('modalTitle').textContent=mode==='deposit'?'Пополнить баланс ⭐':'Заявка на вывод 💸';$('modalDesc').textContent=mode==='deposit'?'Укажи количество Telegram Stars (минимум 100 ⭐). Игровые ⭐ы будут начислены после оплаты.':'Укажи количество ⭐ (минимум 2 500). Сумма будет временно зарезервирована до решения администратора.';$('amount').value=mode==='deposit'?100:2500;$('amount').min=mode==='deposit'?100:2500;$('modal').classList.add('show')}
 $('deposit').onclick=()=>openModal('deposit');$('withdraw').onclick=()=>openModal('withdraw');$('cancel').onclick=()=>$('modal').classList.remove('show');
 $('confirm').onclick=async()=>{const amount=Number($('amount').value);const minimum=state.mode==='deposit'?100:2500;if(!Number.isInteger(amount)||amount<minimum){toast('Минимум: '+minimum.toLocaleString('ru-RU')+' ⭐');return}try{const d=await api(state.mode==='deposit'?'/api/deposit':'/api/withdraw',{amount});$('modal').classList.remove('show');toast(d.message||'Готово');if(state.mode==='withdraw'){setBalance(d.balance);refresh()}else if(tg){tg.showAlert('Счёт отправлен в чат с ботом. Оплати его там, затем вернись в приложение.')}}catch(e){toast(e.message)}};
+const caseNamesForAssets={starter:0,neon:1,crystal:2,royal:3,legend:4,cosmic:5};
 const CASES={starter:{name:'STARTER',price:50,icon:'starter'},neon:{name:'NEON',price:100,icon:'neon'},crystal:{name:'CRYSTAL',price:250,icon:'crystal'},royal:{name:'ROYAL',price:500,icon:'royal'},legend:{name:'LEGEND',price:1000,icon:'legend'},cosmic:{name:'COSMIC',price:2500,icon:'cosmic'}};
 let caseBusy=false,caseSelected=null;
 const caseWait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -513,7 +510,8 @@ function caseReward(outcome){
 async function playCaseRoulette(outcome){
  const reward=caseReward(outcome),track=$('caseReelTrack'),viewport=$('caseReel');
  const items=Array.from({length:47},(_,i)=>i===39?reward:({icon:['star','diamond','crystal','coin','wallet','refresh'][Math.floor(Math.random()*6)],label:'DROP',tier:['tier-low','tier-mid'][Math.floor(Math.random()*2)]}));
- track.innerHTML=items.map(x=>'<div class="case-reel-item '+x.tier+'"><i data-reward="'+x.icon+'"></i><small>'+x.label+'</small></div>').join('');
+ const rewardFiles={star:'r0c0',coin:'r0c1',crystal:'r0c2',diamond:'r1c0',wallet:'r1c1',refresh:'r1c2'};
+ track.innerHTML=items.map(x=>'<div class="case-reel-item '+x.tier+'"><img src="/assets/rewards/'+(rewardFiles[x.icon]||'r0c0')+'.png" alt=""><small>'+x.label+'</small></div>').join('');
  track.style.transition='none';track.style.transform='translate3d(0,0,0)';
  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
  const tile=track.querySelector('.case-reel-item');
@@ -541,7 +539,7 @@ document.querySelectorAll('[data-case]').forEach(btn=>btn.addEventListener('clic
  if(state.balance<config.price){toast('Недостаточно ⭐ для этого кейса.');return}
  caseBusy=true;caseSelected=id;document.querySelectorAll('[data-case]').forEach(b=>b.disabled=true);
  $('caseOpening').hidden=false;$('caseOpening').classList.add('spinning');$('caseOpening').classList.remove('revealing');
- $('caseOpeningName').textContent=config.name+' CASE';$('caseBigIcon').className='case-big-icon '+config.icon;$('caseBigIcon').textContent='';
+ $('caseOpeningName').textContent=config.name+' CASE';$('caseBigIcon').src='/assets/cases/r'+Math.floor(caseNamesForAssets[id]/3)+'c'+(caseNamesForAssets[id]%3)+'.png';
  $('caseResult').className='case-result';$('caseResult').textContent='Сервер рассчитывает дроп…';$('caseAgain').hidden=true;
  $('caseReelTrack').innerHTML='';$('caseReelTrack').style.transition='none';$('caseReelTrack').style.transform='translate3d(0,0,0)';
  $('caseOpening').scrollIntoView({behavior:'smooth',block:'center'});
@@ -551,7 +549,7 @@ document.querySelectorAll('[data-case]').forEach(btn=>btn.addEventListener('clic
  setBalance(outcome.balance);
  const reward=await playCaseRoulette(outcome);
  $('caseOpening').classList.remove('spinning');$('caseOpening').classList.add('revealing');
- $('caseBigIcon').className='case-big-icon '+config.icon;$('caseBigIcon').textContent='';
+ $('caseBigIcon').src='/assets/cases/r'+Math.floor(caseNamesForAssets[id]/3)+'c'+(caseNamesForAssets[id]%3)+'.png';
  const won=outcome.payout>0,net=outcome.net;
  $('caseResult').className='case-result '+(outcome.multiplier>=5?'jackpot':won?'win':'');
  $('caseResult').innerHTML=outcome.multiplier>=5?'🏆 JACKPOT! +'+outcome.payout.toLocaleString('ru-RU')+' ⭐':won?'ВЫПАЛО '+outcome.payout.toLocaleString('ru-RU')+' ⭐':'В ЭТОТ РАЗ БЕЗ ВЫПЛАТЫ';
