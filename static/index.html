@@ -549,7 +549,7 @@ document.querySelectorAll('[data-case]').forEach(btn=>btn.addEventListener('clic
  setBalance(outcome.balance);
  const reward=await playCaseRoulette(outcome);
  $('caseOpening').classList.remove('spinning');$('caseOpening').classList.add('revealing');
- $('caseBigIcon').src='/assets/clean/cases/r'+Math.floor(caseNamesForAssets[id]/3)+'c'+(caseNamesForAssets[id]%3)+'.png';
+ $('caseBigIcon').src='/assets/clean/cases/'+caseNamesForAssets[id]+'.png';
  const won=outcome.payout>0,net=outcome.net;
  $('caseResult').className='case-result '+(outcome.multiplier>=5?'jackpot':won?'win':'');
  $('caseResult').innerHTML=outcome.multiplier>=5?'🏆 JACKPOT! +'+outcome.payout.toLocaleString('ru-RU')+' ⭐':won?'ВЫПАЛО '+outcome.payout.toLocaleString('ru-RU')+' ⭐':'В ЭТОТ РАЗ БЕЗ ВЫПЛАТЫ';
