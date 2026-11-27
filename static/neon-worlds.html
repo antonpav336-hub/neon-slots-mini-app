@@ -80,7 +80,7 @@ async function runSpin(isBuy=false){
  if(busy)return;
  const bet=betValue(),wasBonusMode=bonusMode,previousBonus=bonus;
  if(!initData){toast('Открой Mini App через Telegram-бота');return}
- if(!bonusMode&&serverReady&&serverBalance<(isBuy?bet*100:Math.ceil(bet*(ante?1.25:1)))){toast('Недостаточно звёзд');$('message').textContent='Недостаточно звёзд';if(auto){auto=false;$('auto').textContent='↻ AUTO: OFF'}return}
+ if(!bonusMode&&serverReady&&serverBalance<(isBuy?bet*100:Math.ceil(bet*(ante?1.25:1)))){toast('Недостаточно звёзд');$('message').textContent='Недостаточно звёзд';if(auto){auto=false;$('auto').textContent='↻ AUTO: OFF';clearTimeout(autoTimer)}return}
  busy=true;syncControls();$('message').textContent=bonusMode?'FREE SPIN…':'Сервер готовит раунд…';SoundManager.click();haptic('medium');
  const requestId=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2));
  let result;
