@@ -287,6 +287,12 @@ def transfer(
             if not recipient:
                 raise HTTPException(status_code=404, detail="Получатель не найден")
 
+            settings = conn.execute(
+                "SELECT card_frozen FROM wallet_settings WHERE user_id = %s", (user["id"],)
+            ).fetchone()
+            if settings and settings["card_frozen"]:
+                raise HTTPException(status_code=409, detail="Карта заморожена. Исходящие операции заблокированы.")
+
             debit = conn.execute(
                 """UPDATE wallets SET balance_kopecks = balance_kopecks - %s, updated_at = NOW()
                    WHERE user_id = %s AND balance_kopecks >= %s RETURNING balance_kopecks""",
