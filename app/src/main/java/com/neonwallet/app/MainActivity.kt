@@ -1,6 +1,8 @@
 package com.neonwallet.app
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.*
@@ -9,27 +11,33 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
-import org.json.JSONArray
-import org.json.JSONObject
-import androidx.compose.ui.*
-import androidx.compose.ui.draw.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.*
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.NumberFormat
 import java.util.Locale
+import java.util.UUID
 
-private val Bg = Color(0xFF0D0B12)
-private val Panel = Color(0xFF19161F)
-private val Purple = Color(0xFFB49AF5)
-private val Muted = Color(0xFFA39CAB)
-private val White = Color(0xFFF6F2F8)
-private val Green = Color(0xFF72CBA8)
+private val Bg = Color(0xFF090711)
+private val Panel = Color(0xFF171323)
+private val Purple = Color(0xFF9B5CFF)
+private val Lavender = Color(0xFFC7A6FF)
+private val Green = Color(0xFF48D7A0)
+private val White = Color(0xFFF7F3FF)
+private val Muted = Color(0xFFA69BB8)
+private const val API_BASE = "https://neon-wallet-api-rpkc.onrender.com"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,51 +46,173 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class Tx(val title: String, val date: String, val amount: Long, val incoming: Boolean)
-private enum class Tab { HOME, CARDS, HISTORY, PROFILE }
+private data class Account(val id: String, val username: String, val email: String)
+private data class Wallet(val id: String, val balance: Long)
+private data class Tx(val id: String, val title: String, val date: String, val amount: Long, val incoming: Boolean)
+
+private object WalletApi {
+    private fun call(method: String, path: String, token: String? = null,
+                     body: JSONObject? = null, key: String? = null): JSONObject {
+        val c = URL(API_BASE + path).openConnection() as HttpURLConnection
+        c.requestMethod = method
+        c.connectTimeout = 15000
+        c.readTimeout = 20000
+        c.setRequestProperty("Accept", "application/json")
+        if (token != null) c.setRequestProperty("Authorization", "Bearer " + token)
+        if (key != null) c.setRequestProperty("Idempotency-Key", key)
+        if (body != null) {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        }
+        try {
+            val code = c.responseCode
+            val stream = if (code in 200..299) c.inputStream else c.errorStream
+            val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                val detail = try { JSONObject(raw).optString("detail", "Ошибка запроса: " + code) }
+                    catch (_: Exception) { "Ошибка запроса: " + code }
+                throw IllegalStateException(detail)
+            }
+            return if (raw.isBlank()) JSONObject() else JSONObject(raw)
+        } finally { c.disconnect() }
+    }
+
+    fun login(email: String, password: String): String =
+        call("POST", "/v1/auth/login", body = JSONObject().put("email", email).put("password", password)).getString("access_token")
+
+    fun register(name: String, email: String, password: String): String =
+        call("POST", "/v1/auth/register", body = JSONObject().put("username", name)
+            .put("email", email).put("password", password)).getString("access_token")
+
+    fun load(token: String): Triple<Account, Wallet, List<Tx>> {
+        val me = call("GET", "/v1/me", token).getJSONObject("user")
+        val account = Account(me.getString("account_id"), me.getString("username"), me.getString("email"))
+        val w = call("GET", "/v1/wallet", token)
+        val wallet = Wallet(w.getString("account_id"), w.getLong("balance_kopecks"))
+        val array = call("GET", "/v1/transactions?limit=100", token).getJSONArray("items")
+        val txs = (0 until array.length()).map { i ->
+            val t = array.getJSONObject(i)
+            val incoming = t.optString("recipient_account_id") == account.id
+            Tx(t.getString("id"), t.getString("description"), t.getString("created_at"),
+                t.getLong("amount_kopecks"), incoming)
+        }
+        return Triple(account, wallet, txs)
+    }
+
+    fun transfer(token: String, recipient: String, rubles: Long) =
+        call("POST", "/v1/transfers", token,
+            JSONObject().put("recipient_account_id", recipient).put("amount_kopecks", rubles * 100)
+                .put("description", "Перевод NEON WALLET"), UUID.randomUUID().toString())
+}
+
+private fun <T> async(task: () -> T, done: (Result<T>) -> Unit) {
+    Thread {
+        val result = runCatching(task)
+        Handler(Looper.getMainLooper()).post { done(result) }
+    }.start()
+}
 
 @Composable
-fun NeonWalletApp() {
-    val context = LocalContext.current
-    val prefs = remember(context) { context.getSharedPreferences("neon_wallet_demo", android.content.Context.MODE_PRIVATE) }
-    var tab by remember { mutableStateOf(Tab.HOME) }
-    var balance by remember { mutableLongStateOf(prefs.getLong("balance", 128450L)) }
-    var showBalance by remember { mutableStateOf(true) }
-    var dialog by remember { mutableStateOf<String?>(null) }
-    var txs by remember { mutableStateOf(loadTransactions(prefs)) }
-    SideEffect {
-        val array = JSONArray()
-        txs.forEach { tx ->
-            array.put(JSONObject().apply {
-                put("title", tx.title); put("date", tx.date)
-                put("amount", tx.amount); put("incoming", tx.incoming)
-            })
+private fun NeonWalletApp() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences("neon_wallet_session", 0) }
+    var token by remember { mutableStateOf(prefs.getString("access_token", null)) }
+    var account by remember { mutableStateOf<Account?>(null) }
+    var wallet by remember { mutableStateOf<Wallet?>(null) }
+    var txs by remember { mutableStateOf<List<Tx>>(emptyList()) }
+    var page by remember { mutableStateOf(if (token == null) "auth" else "loading") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var tab by remember { mutableIntStateOf(0) }
+    var transferOpen by remember { mutableStateOf(false) }
+
+    fun refresh(t: String) {
+        busy = true
+        async({ WalletApi.load(t) }) { result ->
+            busy = false
+            result.onSuccess {
+                account = it.first
+                wallet = it.second
+                txs = it.third
+                page = "wallet"
+                error = ""
+            }.onFailure {
+                error = it.message ?: "Не удалось загрузить кошелёк"
+                if (error.contains("авторизац", true) || error.contains("сессия", true)) {
+                    prefs.edit().remove("access_token").apply()
+                    token = null
+                    page = "auth"
+                } else page = "wallet"
+            }
         }
-        prefs.edit().putLong("balance", balance).putString("transactions", array.toString()).apply()
     }
-    MaterialTheme(colorScheme = darkColorScheme(background = Bg, surface = Panel, primary = Purple, onSurface = White)) {
-        Box(Modifier.fillMaxSize().background(Bg)) {
-            Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f)) {
-                    when (tab) {
-                        Tab.HOME -> Home(balance, showBalance, { showBalance = !showBalance },
-                            { dialog = "topup" }, { dialog = "transfer" }, txs)
-                        Tab.CARDS -> Cards()
-                        Tab.HISTORY -> History(txs)
-                        Tab.PROFILE -> Profile()
+
+    LaunchedEffect(token) {
+        if (token == null) page = "auth"
+        else if (page != "wallet") {
+            page = "loading"
+            refresh(token!!)
+        }
+    }
+
+    MaterialTheme(colorScheme = darkColorScheme(
+        background = Bg, surface = Panel, primary = Purple, onPrimary = White,
+        onBackground = White, onSurface = White, secondary = Green
+    )) {
+        Surface(Modifier.fillMaxSize(), color = Bg) {
+            when (page) {
+                "auth" -> AuthScreen(busy, error) { register, name, email, password ->
+                    busy = true
+                    error = ""
+                    async({
+                        if (register) WalletApi.register(name, email, password)
+                        else WalletApi.login(email, password)
+                    }) { result ->
+                        busy = false
+                        result.onSuccess {
+                            prefs.edit().putString("access_token", it).apply()
+                            token = it
+                            page = "loading"
+                        }.onFailure { error = it.message ?: "Ошибка входа" }
                     }
                 }
-                BottomBar(tab) { tab = it }
-            }
-            dialog?.let { kind ->
-                MoneyDialog(kind, balance, onClose = { dialog = null }) { amount, recipient ->
-                    if (canSubmitMoneyOperation(kind, amount, balance, recipient)) {
-                        val incoming = kind == "topup"
-                        balance += if (incoming) amount else -amount
-                        txs = (listOf(Tx(if (incoming) "Демо-пополнение" else "Перевод · $recipient",
-                            "Только что", if (incoming) amount else -amount, incoming)) + txs).take(100)
+                "loading" -> LoadingScreen()
+                else -> {
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f)) {
+                            when (tab) {
+                                0 -> HomeScreen(account, wallet, txs, busy, { transferOpen = true }, { token?.let { refresh(it) } })
+                                1 -> HistoryScreen(txs)
+                                else -> ProfileScreen(account) {
+                                    prefs.edit().remove("access_token").apply()
+                                    token = null
+                                    account = null
+                                    wallet = null
+                                    txs = emptyList()
+                                    page = "auth"
+                                }
+                            }
+                        }
+                        BottomBar(tab) { tab = it }
                     }
-                    dialog = null
+                    if (transferOpen) TransferDialog(wallet?.balance ?: 0L, busy, { transferOpen = false }) { recipient, amount ->
+                        val current = token ?: return@TransferDialog
+                        busy = true
+                        async({ WalletApi.transfer(current, recipient, amount) }) { result ->
+                            busy = false
+                            result.onSuccess {
+                                transferOpen = false
+                                refresh(current)
+                            }.onFailure { error = it.message ?: "Перевод не выполнен" }
+                        }
+                    }
+                    if (error.isNotBlank()) AlertDialog(
+                        onDismissRequest = { error = "" }, containerColor = Panel,
+                        title = { Text("NEON WALLET", color = White) },
+                        text = { Text(error, color = Muted) },
+                        confirmButton = { TextButton(onClick = { error = "" }) { Text("Понятно", color = Lavender) } }
+                    )
                 }
             }
         }
@@ -90,369 +220,273 @@ fun NeonWalletApp() {
 }
 
 @Composable
-private fun Header() {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Purple, Color(0xFF79659A))), CircleShape), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.Bolt, null, tint = White, modifier = Modifier.size(25.dp))
+private fun AuthScreen(busy: Boolean, error: String,
+                       submit: (Boolean, String, String, String) -> Unit) {
+    var register by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF241638), Bg, Bg))),
+        contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            BrandMark(60)
+            Spacer(Modifier.height(22.dp))
+            Text(if (register) "Создать аккаунт" else "С возвращением",
+                color = White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text("Твой виртуальный кошелёк", color = Muted, fontSize = 13.sp,
+                modifier = Modifier.padding(top = 6.dp, bottom = 24.dp))
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                .background(Panel).border(1.dp, Purple.copy(alpha = .25f), RoundedCornerShape(24.dp)).padding(18.dp)) {
+                if (register) {
+                    Field("Имя пользователя", name, { name = it }, Icons.Default.Person)
+                    Spacer(Modifier.height(12.dp))
+                }
+                Field("Электронная почта", email, { email = it }, Icons.Default.Email, KeyboardType.Email)
+                Spacer(Modifier.height(12.dp))
+                Field("Пароль", password, { password = it }, Icons.Default.Lock, KeyboardType.Password, true)
+                if (error.isNotBlank()) Text(error, color = Color(0xFFFF8585), fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 10.dp))
+                Spacer(Modifier.height(17.dp))
+                Button(onClick = { submit(register, name.trim(), email.trim(), password) },
+                    enabled = !busy && email.isNotBlank() && password.isNotBlank() && (!register || name.length >= 3),
+                    modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(15.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple)) {
+                    if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = White, strokeWidth = 2.dp)
+                    else Text(if (register) "Зарегистрироваться" else "Войти", fontWeight = FontWeight.Bold)
+                }
+                TextButton(onClick = { register = !register }) {
+                    Text(if (register) "Уже есть аккаунт? Войти" else "Создать аккаунт", color = Lavender)
+                }
+            }
+            Text("Виртуальные средства · без банковских платежей", color = Muted, fontSize = 10.sp,
+                modifier = Modifier.padding(top = 18.dp))
         }
-        Spacer(Modifier.width(11.dp))
-        Column {
-            Text("NEON", color = White, fontWeight = FontWeight.Black, letterSpacing = 2.sp, fontSize = 18.sp)
-            Text("WALLET", color = Purple, fontWeight = FontWeight.Bold, letterSpacing = 3.sp, fontSize = 10.sp)
-        }
-        Spacer(Modifier.weight(1f))
-        Icon(Icons.Default.NotificationsNone, null, tint = White, modifier = Modifier.size(24.dp))
     }
 }
 
 @Composable
-private fun Home(balance: Long, visible: Boolean, toggle: () -> Unit, topup: () -> Unit, transfer: () -> Unit, txs: List<Tx>) {
+private fun HomeScreen(account: Account?, wallet: Wallet?, txs: List<Tx>, busy: Boolean,
+                       transfer: () -> Unit, refresh: () -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 22.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFFBBA6EA), Color(0xFF68577E)))),
-                    contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.AccountBalanceWallet, null, tint = Color(0xFF17131D), modifier = Modifier.size(24.dp))
-                }
+            Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
+                BrandMark(46)
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text("NEON WALLET", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
-                    Text("ТВОИ ФИНАНСЫ ПОД КОНТРОЛЕМ", color = Muted, fontSize = 9.sp, letterSpacing = 1.1.sp)
+                    Text("NEON WALLET", color = White, fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.4.sp)
+                    Text("ТВОИ ФИНАНСЫ ПОД КОНТРОЛЕМ", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
                 }
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.size(42.dp).clip(CircleShape).background(Panel), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.NotificationsNone, null, tint = White)
+                IconButton(onClick = refresh) {
+                    if (busy) CircularProgressIndicator(Modifier.size(19.dp), color = Lavender, strokeWidth = 2.dp)
+                    else Icon(Icons.Default.Refresh, null, tint = Lavender)
                 }
             }
         }
         item {
             Column(Modifier.padding(horizontal = 20.dp)) {
-                Text("МОЙ СЧЁТ", color = Muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp)
-                Spacer(Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFF3A3147), Color(0xFF24202B), Color(0xFF1B1821))))
-                    .border(1.dp, Color(0xFFB49AF5).copy(alpha = .24f), RoundedCornerShape(30.dp))
-                    .padding(23.dp)) {
-                    Box(Modifier.align(Alignment.TopEnd).size(150.dp).offset(x = 55.dp, y = (-58).dp)
-                        .background(Color(0xFFB49AF5).copy(alpha = .09f), CircleShape).blur(3.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Доступный баланс", color = Color(0xFFC9C0D2), fontSize = 13.sp)
-                            Spacer(Modifier.width(8.dp))
-                            IconButton(onClick = toggle, modifier = Modifier.size(28.dp)) {
-                                Icon(if (visible) Icons.Default.Visibility else Icons.Default.VisibilityOff, null,
-                                    tint = Color(0xFFC9C0D2), modifier = Modifier.size(17.dp))
-                            }
-                        }
-                        Text(if (visible) money(balance) else "•••••• ₽", color = White,
-                            fontSize = 35.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-                        Spacer(Modifier.height(7.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(7.dp).clip(CircleShape).background(Green))
-                            Spacer(Modifier.width(7.dp))
-                            Text("Российский рубль · RUB", color = Color(0xFFB8AFBF), fontSize = 11.sp)
-                        }
-                        Spacer(Modifier.height(24.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(onClick = topup, modifier = Modifier.weight(1f).height(50.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB9A5E8)),
-                                shape = RoundedCornerShape(16.dp)) {
-                                Icon(Icons.Default.Add, null, tint = Color(0xFF211A2B))
-                                Spacer(Modifier.width(7.dp))
-                                Text("Пополнить", color = Color(0xFF211A2B), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                            OutlinedButton(onClick = transfer, modifier = Modifier.weight(1f).height(50.dp),
-                                border = BorderStroke(1.dp, Color(0xFF8F829D)),
-                                shape = RoundedCornerShape(16.dp)) {
-                                Icon(Icons.Default.ArrowUpward, null, tint = White)
-                                Spacer(Modifier.width(7.dp))
-                                Text("Перевести", color = White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            }
-                        }
+                Text("МОЙ КОШЕЛЁК", color = Muted, fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(10.dp))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFF422A5D), Color(0xFF21182F), Panel)))
+                    .border(1.dp, Purple.copy(alpha = .35f), RoundedCornerShape(28.dp)).padding(22.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Доступный баланс", color = Color(0xFFD4C8E5), fontSize = 13.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text("АКТИВЕН", color = Green, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text(wallet?.let { money(it.balance) } ?: "— ₽", color = White,
+                        fontSize = 36.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+                    Text("Виртуальные RUB", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    Spacer(Modifier.height(15.dp))
+                    Text("ID аккаунта: " + (account?.id ?: "—"), color = Lavender, fontSize = 12.sp)
+                    Spacer(Modifier.height(18.dp))
+                    Button(onClick = transfer, modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = Purple)) {
+                        Icon(Icons.Default.ArrowUpward, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Перевести средства", fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
         item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 28.dp, bottom = 15.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Платежи и переводы", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
-                Text("Все", color = Color(0xFFB9A5E8), fontSize = 12.sp)
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                QuickAction("По номеру", Icons.Default.Person, Color(0xFFB9A5E8), transfer, Modifier.weight(1f))
-                QuickAction("По QR-коду", Icons.Default.QrCodeScanner, Color(0xFF86BFA9), topup, Modifier.weight(1f))
-                QuickAction("На карту", Icons.Default.CreditCard, Color(0xFFE0B68A), transfer, Modifier.weight(1f))
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 29.dp, bottom = 13.dp),
+            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 27.dp, bottom = 13.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("Последние операции", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
-                Text("История", color = Color(0xFFB9A5E8), fontSize = 12.sp)
+                Text(txs.size.toString(), color = Muted, fontSize = 12.sp)
             }
         }
-        if (txs.isEmpty()) {
-            item {
-                Text("Здесь появятся ваши операции", Modifier.padding(horizontal = 22.dp, vertical = 20.dp),
-                    color = Muted, fontSize = 13.sp)
-            }
-        } else {
-            items(txs.take(5)) { TransactionRow(it) }
-        }
-        item {
-            Text("Баланс и операции отображаются в демонстрационном режиме.",
-                Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 18.dp),
-                color = Muted.copy(alpha = .8f), fontSize = 10.sp)
-        }
-    }
-}
-@Composable
-private fun ActionButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, action: () -> Unit, filled: Boolean, modifier: Modifier = Modifier) {
-    Button(onClick = action, modifier = modifier.height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = if (filled) Purple else Color(0xFF393142)), shape = RoundedCornerShape(15.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
-        Icon(icon, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        if (txs.isEmpty()) item { EmptyState("Пока нет операций", "История переводов появится здесь") }
+        else items(txs.take(5), key = { it.id }) { TransactionRow(it) }
     }
 }
 
 @Composable
-private fun QuickAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color, action: () -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.clip(RoundedCornerShape(18.dp)).background(Panel).clickable { action() }.padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(43.dp).clip(RoundedCornerShape(14.dp)).background(color.copy(alpha = .16f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = color) }
-        Spacer(Modifier.height(9.dp)); Text(label, color = White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+private fun HistoryScreen(txs: List<Tx>) {
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(22.dp)) {
+            Text("История", color = White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text("Все операции кошелька", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+        }
+        if (txs.isEmpty()) EmptyState("Операций пока нет", "Движения средств появятся здесь")
+        else LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+            items(txs, key = { it.id }) { TransactionRow(it) }
+        }
     }
+}
+
+@Composable
+private fun ProfileScreen(account: Account?, logout: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(22.dp)) {
+        Text("Профиль", color = White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+        Text("Настройки аккаунта", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp, bottom = 22.dp))
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Panel).padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            BrandMark(54)
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text(account?.username ?: "NEON USER", color = White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(account?.email ?: "", color = Muted, fontSize = 11.sp)
+                Text("ID " + (account?.id ?: "—"), color = Lavender, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        ProfileRow(Icons.Default.Security, "Безопасность", "Защищённая серверная авторизация")
+        ProfileRow(Icons.Default.Storage, "Данные кошелька", "Баланс и операции хранятся на сервере")
+        ProfileRow(Icons.Default.Info, "О приложении", "NEON WALLET")
+        Spacer(Modifier.weight(1f))
+        OutlinedButton(onClick = logout, modifier = Modifier.fillMaxWidth().height(50.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF765A91)), shape = RoundedCornerShape(15.dp)) {
+            Icon(Icons.Default.Logout, null, tint = Lavender)
+            Spacer(Modifier.width(8.dp))
+            Text("Выйти из аккаунта", color = Lavender)
+        }
+    }
+}
+
+@Composable
+private fun ProfileRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp))
+        .background(Panel).padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Lavender)
+        Spacer(Modifier.width(13.dp))
+        Column {
+            Text(title, color = White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = Muted, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun TransferDialog(balance: Long, busy: Boolean, close: () -> Unit,
+                           send: (String, Long) -> Unit) {
+    var recipient by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    val rubles = amount.toLongOrNull() ?: 0L
+    val valid = recipient.length in 6..12 && recipient.all(Char::isDigit) &&
+        rubles > 0 && rubles <= balance / 100
+    AlertDialog(onDismissRequest = close, containerColor = Panel,
+        title = { Text("Новый перевод", color = White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text("Перевод по ID NEON WALLET", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 12.dp))
+                Field("ID получателя", recipient, { recipient = it.filter(Char::isDigit).take(12) },
+                    Icons.Default.Person, KeyboardType.Number)
+                Spacer(Modifier.height(10.dp))
+                Field("Сумма в ₽", amount, { amount = it.filter(Char::isDigit).take(8) },
+                    Icons.Default.CurrencyRuble, KeyboardType.Number)
+                Text("Доступно: " + money(balance), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 9.dp))
+                if (rubles > balance / 100 && amount.isNotBlank()) Text("Недостаточно средств", color = Color(0xFFFF8585), fontSize = 11.sp)
+            }
+        },
+        confirmButton = { TextButton(enabled = valid && !busy, onClick = { send(recipient, rubles) }) {
+            Text(if (busy) "Отправка…" else "Перевести", color = Lavender)
+        } },
+        dismissButton = { TextButton(onClick = close) { Text("Отмена", color = Muted) } }
+    )
+}
+
+@Composable
+private fun Field(label: String, value: String, change: (String) -> Unit,
+                  icon: androidx.compose.ui.graphics.vector.ImageVector,
+                  keyboard: KeyboardType = KeyboardType.Text, password: Boolean = false) {
+    OutlinedTextField(value = value, onValueChange = change, modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) }, singleLine = true,
+        leadingIcon = { Icon(icon, null, tint = Muted, modifier = Modifier.size(18.dp)) },
+        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = White, unfocusedTextColor = White,
+            focusedBorderColor = Purple, unfocusedBorderColor = Color(0xFF51445F),
+            focusedLabelColor = Lavender, unfocusedLabelColor = Muted, cursorColor = Lavender))
 }
 
 @Composable
 private fun TransactionRow(tx: Tx) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).clip(RoundedCornerShape(16.dp)).background(Panel).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(if (tx.incoming) Green.copy(alpha = .13f) else Purple.copy(alpha = .15f)), contentAlignment = Alignment.Center) {
-            Icon(if (tx.incoming) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward, null, tint = if (tx.incoming) Green else Purple)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp)
+        .clip(RoundedCornerShape(16.dp)).background(Panel).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp))
+            .background(if (tx.incoming) Green.copy(alpha = .13f) else Purple.copy(alpha = .16f)),
+            contentAlignment = Alignment.Center) {
+            Icon(if (tx.incoming) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward, null,
+                tint = if (tx.incoming) Green else Lavender)
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(tx.title, color = White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(tx.date, color = Muted, fontSize = 11.sp)
+            Text(tx.date.replace("T", " ").take(16), color = Muted, fontSize = 10.sp)
         }
-        val signedAmount = when {
-            tx.amount > 0 -> "+" + money(tx.amount)
-            tx.amount < 0 -> "−" + money(tx.amount)
-            else -> money(0)
-        }
-        Text(signedAmount, color = if (tx.incoming) Green else White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text((if (tx.incoming) "+" else "−") + money(tx.amount), color = if (tx.incoming) Green else White,
+            fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
-private fun Cards() {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 26.dp)) {
-        item {
-            Header()
-            Text("Карты и счета", Modifier.padding(horizontal = 22.dp), color = White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-            Text("Ваши платёжные инструменты", Modifier.padding(start = 22.dp, top = 5.dp), color = Muted, fontSize = 13.sp)
-        }
-        item {
-            Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 22.dp).height(210.dp)
-                .clip(RoundedCornerShape(27.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF51475F), Color(0xFF302A38), Color(0xFF211D26))))
-                .border(1.dp, Color(0xFFC5B1E8).copy(alpha = .26f), RoundedCornerShape(27.dp)).padding(22.dp)) {
-                Box(Modifier.align(Alignment.TopEnd).size(145.dp).offset(x = 48.dp, y = (-48).dp)
-                    .background(Color(0xFFBBA6EA).copy(alpha = .12f), CircleShape))
-                Column(Modifier.fillMaxHeight()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("NEON", color = White, fontWeight = FontWeight.Black, fontSize = 18.sp, letterSpacing = 2.sp)
-                        Spacer(Modifier.weight(1f))
-                        Icon(Icons.Default.Contactless, null, tint = White.copy(alpha = .8f), modifier = Modifier.size(25.dp))
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Text("••••  ••••  ••••  2048", color = White, fontSize = 18.sp, letterSpacing = 1.5.sp)
-                    Spacer(Modifier.height(15.dp))
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Column {
-                            Text("ВЛАДЕЛЕЦ", color = White.copy(alpha = .6f), fontSize = 9.sp, letterSpacing = 1.sp)
-                            Text("NEON USER", color = White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(Modifier.weight(1f))
-                        Text("VIRTUAL", color = White.copy(alpha = .85f), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                    }
-                }
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 25.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Мои продукты", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
-                Text("1 продукт", color = Muted, fontSize = 11.sp)
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).clip(RoundedCornerShape(18.dp))
-                .background(Panel).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFFBBA6EA).copy(alpha = .14f)),
-                    contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.CreditCard, null, tint = Purple)
-                }
-                Spacer(Modifier.width(13.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Виртуальная карта", color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Макет интерфейса · не платёжный инструмент", color = Muted, fontSize = 10.sp)
-                }
-                Icon(Icons.Default.ChevronRight, null, tint = Muted)
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 24.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Возможности", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            }
-            listOf(
-                Triple(Icons.Default.Lock, "Безопасное хранение", "Подключим после настройки защищённого сервера"),
-                Triple(Icons.Default.QrCode2, "Оплата по QR-коду", "Подключение платёжного провайдера"),
-                Triple(Icons.Default.AccountBalance, "Банковские переводы", "Требуется интеграция с партнёром")
-            ).forEach { (icon, title, subtitle) ->
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(15.dp)).background(Panel).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, tint = Purple)
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(title, color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Text(subtitle, color = Muted, fontSize = 10.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-
-@Composable
-private fun History(txs: List<Tx>) {
-    Column(Modifier.fillMaxSize()) {
-        Header()
-        Text("История операций", Modifier.padding(horizontal = 22.dp), color = White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Text("Все движения средств", Modifier.padding(start = 22.dp, top = 5.dp, bottom = 18.dp), color = Muted, fontSize = 13.sp)
-        LazyColumn { items(txs) { TransactionRow(it) } }
+private fun EmptyState(title: String, subtitle: String) {
+    Column(Modifier.fillMaxWidth().padding(35.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(Icons.Default.ReceiptLong, null, tint = Lavender, modifier = Modifier.size(38.dp))
+        Text(title, color = White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+        Text(subtitle, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
     }
 }
 
 @Composable
-private fun Profile() {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item {
-            Header()
-            Text("Профиль", Modifier.padding(horizontal = 22.dp), color = White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(20.dp))
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).clip(RoundedCornerShape(22.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF30283A), Panel))).padding(18.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(58.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Color(0xFFC7B4ED), Color(0xFF78658F)))),
-                    contentAlignment = Alignment.Center) {
-                    Text("N", color = Color(0xFF211A2B), fontSize = 27.sp, fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text("NEON USER", color = White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("Личный кабинет", color = Muted, fontSize = 12.sp)
-                }
-                Spacer(Modifier.weight(1f))
-                Icon(Icons.Default.ChevronRight, null, tint = Muted)
-            }
-        }
-        item {
-            Text("Настройки", Modifier.padding(start = 22.dp, top = 27.dp, bottom = 10.dp), color = Muted,
-                fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp)
-            listOf(
-                Triple(Icons.Default.PersonOutline, "Личные данные", "Имя и контактная информация"),
-                Triple(Icons.Default.Security, "Безопасность", "PIN-код и способы входа"),
-                Triple(Icons.Default.NotificationsNone, "Уведомления", "Настройки оповещений"),
-                Triple(Icons.Default.HelpOutline, "Помощь", "Поддержка и ответы на вопросы"),
-                Triple(Icons.Default.Info, "О приложении", "Версия и юридическая информация")
-            ).forEach { (icon, title, subtitle) ->
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(16.dp)).background(Panel).clickable { }.padding(15.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(39.dp).clip(RoundedCornerShape(13.dp)).background(Color(0xFFBBA6EA).copy(alpha = .12f)),
-                        contentAlignment = Alignment.Center) { Icon(icon, null, tint = Purple, modifier = Modifier.size(20.dp)) }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(title, color = White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text(subtitle, color = Muted, fontSize = 10.sp)
-                    }
-                    Icon(Icons.Default.ChevronRight, null, tint = Muted)
-                }
-            }
-        }
-        item {
-            Text("NEON WALLET · PREVIEW", Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
-                color = Muted.copy(alpha = .65f), fontSize = 9.sp, letterSpacing = 1.3.sp)
-        }
-    }
-}
-
-
-@Composable
-private fun BottomBar(selected: Tab, onSelect: (Tab) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Color(0xFF15121A)).navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
-        listOf(Triple(Tab.HOME, Icons.Default.Home, "Главная"), Triple(Tab.CARDS, Icons.Default.CreditCard, "Карты"),
-            Triple(Tab.HISTORY, Icons.Default.ReceiptLong, "История"), Triple(Tab.PROFILE, Icons.Default.Person, "Профиль")).forEach { (tab, icon, label) ->
-            Column(Modifier.weight(1f).clip(RoundedCornerShape(13.dp)).clickable { onSelect(tab) }.padding(vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(icon, null, tint = if (selected == tab) Purple else Muted, modifier = Modifier.size(21.dp))
-                Spacer(Modifier.height(3.dp)); Text(label, color = if (selected == tab) Purple else Muted, fontSize = 10.sp, fontWeight = if (selected == tab) FontWeight.Bold else FontWeight.Normal)
-            }
+private fun LoadingScreen() {
+    Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            BrandMark(62)
+            CircularProgressIndicator(Modifier.padding(top = 22.dp).size(25.dp), color = Lavender, strokeWidth = 2.dp)
+            Text("Подключаем кошелёк…", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp))
         }
     }
 }
 
 @Composable
-private fun MoneyDialog(kind: String, balance: Long, onClose: () -> Unit, onConfirm: (Long, String) -> Unit) {
-    var amount by remember { mutableStateOf("") }
-    var who by remember { mutableStateOf("") }
-    val transfer = kind == "transfer"
-    val parsedAmount = amount.toLongOrNull() ?: 0L
-    val canSubmit = canSubmitMoneyOperation(kind, parsedAmount, balance, who)
-    AlertDialog(onDismissRequest = onClose, containerColor = Panel,
-        title = { Text(if (transfer) "Новый перевод" else "Пополнение", color = White, fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                OutlinedTextField(value = who, onValueChange = { who = it }, label = { Text(if (transfer) "Кому (демо)" else "Источник (демо)") }, singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = White, unfocusedTextColor = White, focusedBorderColor = Purple, unfocusedBorderColor = Muted, focusedLabelColor = Purple, unfocusedLabelColor = Muted))
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(value = amount, onValueChange = { amount = it.filter(Char::isDigit).take(9) }, label = { Text("Сумма в ₽") }, singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = White, unfocusedTextColor = White, focusedBorderColor = Purple, unfocusedBorderColor = Muted, focusedLabelColor = Purple, unfocusedLabelColor = Muted))
-                if (transfer && who.isNotBlank() && parsedAmount > balance) {
-                    Text("Недостаточно средств на демо-балансе.", color = Color(0xFFFF8A8A), fontSize = 11.sp)
-                } else if (transfer && who.isBlank()) {
-                    Text("Укажи получателя перевода.", color = Muted, fontSize = 11.sp)
-                } else if (amount.isNotBlank() && parsedAmount <= 0L) {
-                    Text("Введи сумму больше нуля.", color = Color(0xFFFF8A8A), fontSize = 11.sp)
-                }
-                Text("Демо-режим: реальные деньги не перемещаются.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
+private fun BrandMark(size: Int = 52) {
+    Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 3).dp))
+        .background(Brush.linearGradient(listOf(Color(0xFFBD8BFF), Purple, Color(0xFF6230A8)))),
+        contentAlignment = Alignment.Center) {
+        Icon(Icons.Default.Bolt, null, tint = Color(0xFF160D22), modifier = Modifier.size((size * .62f).dp))
+    }
+}
+
+@Composable
+private fun BottomBar(selected: Int, select: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().background(Color(0xFF100C18)).navigationBarsPadding()
+        .padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
+        val entries = listOf(Triple(Icons.Default.Home, "Главная", 0),
+            Triple(Icons.Default.ReceiptLong, "История", 1), Triple(Icons.Default.Person, "Профиль", 2))
+        entries.forEach { entry ->
+            Column(Modifier.weight(1f).clip(RoundedCornerShape(13.dp)).clickable { select(entry.third) }
+                .padding(vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(entry.first, null, tint = if (selected == entry.third) Lavender else Muted, modifier = Modifier.size(21.dp))
+                Text(entry.second, color = if (selected == entry.third) Lavender else Muted, fontSize = 10.sp,
+                    fontWeight = if (selected == entry.third) FontWeight.Bold else FontWeight.Normal)
             }
-        },
-        confirmButton = { TextButton(enabled = canSubmit, onClick = { onConfirm(parsedAmount, who.trim()) }) { Text(if (transfer) "Отправить" else "Добавить", color = Purple) } },
-        dismissButton = { TextButton(onClick = onClose) { Text("Отмена", color = Muted) } }
-    )
-}
-
-private fun money(value: Long): String = NumberFormat.getNumberInstance(Locale("ru", "RU")).format(kotlin.math.abs(value)) + " ₽"
-
-private fun loadTransactions(prefs: android.content.SharedPreferences): List<Tx> {
-    val stored = prefs.getString("transactions", null)
-    if (stored.isNullOrBlank()) return listOf(
-        Tx("Пополнение", "Сегодня · 10:42", 25000, true),
-        Tx("Coffee House", "Сегодня · 09:18", -680, false),
-        Tx("Перевод от Alex", "Вчера · 18:35", 12000, true),
-        Tx("Подписка", "Вчера · 12:00", -499, false)
-    )
-    return try {
-        val array = JSONArray(stored)
-        (0 until array.length()).map { i ->
-            val item = array.getJSONObject(i)
-            Tx(item.getString("title"), item.getString("date"), item.getLong("amount"), item.getBoolean("incoming"))
         }
-    } catch (_: Exception) { emptyList() }
+    }
 }
+
+private fun money(kopecks: Long): String =
+    NumberFormat.getNumberInstance(Locale("ru", "RU")).format(kopecks / 100.0) + " ₽"
