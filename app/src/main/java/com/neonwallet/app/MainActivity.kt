@@ -52,6 +52,12 @@ class MainActivity : ComponentActivity() {
         setContent { NeonWalletApp { action -> lockAction = action } }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Re-check the lock whenever the activity returns to the foreground.
+        Handler(Looper.getMainLooper()).post { lockAction?.invoke() }
+    }
+
     override fun onStop() {
         super.onStop()
         lockAction?.invoke()
@@ -133,6 +139,7 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
     var account by remember { mutableStateOf<Account?>(null) }
     var wallet by remember { mutableStateOf<Wallet?>(null) }
     var txs by remember { mutableStateOf<List<Tx>>(emptyList()) }
+    // A saved session is never considered unlocked after process/activity recreation.
     var page by remember { mutableStateOf(if (token == null) "auth" else "pin") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
