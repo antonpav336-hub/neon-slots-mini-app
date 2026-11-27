@@ -401,7 +401,7 @@ def _slot_simulate(game_id, game, bet, ante, buy, session):
 
     board = _slot_board(game)
     if buy:
-        target = secrets.randbelow(5) + (3 if game_id == "sugar" else 4)
+        target = secrets.randbelow(5 if game_id == "sugar" else 3) + (3 if game_id == "sugar" else 4)
         _slot_place_scatters(board, game, target)
     elif secrets.randbelow(10000) < (1300 if ante else 650):
         low = 3 if game_id == "sugar" else 4
@@ -484,7 +484,7 @@ def _slot_simulate(game_id, game, bet, ante, buy, session):
         "multiplier":all_mult,"bonus":bonus,"bonus_mode":bonus_mode,
         "global_mult":global_mult,"cell_hits":cell_hits,
         "scatters":initial_scatter,"cascades":cascades,
-        "is_free":is_free
+        "is_free":is_free,"spin_mults":spin_mults
     }
 
 @app.post("/api/slots/play")
@@ -540,7 +540,7 @@ async def slots_play(body: dict, request: Request):
             "ok":True,"game_id":game_id,"bet":bet,"cost":cost,"balance":new_balance,
             "payout":int(result["payout"]),"multiplier":result["multiplier"],
             "bonus":result["bonus"],"bonus_mode":result["bonus_mode"],
-            "global_mult":result["global_mult"],"scatters":result["scatters"],
+            "global_mult":result["global_mult"],"scatters":result["scatters"],"spin_mults":result["spin_mults"],
             "cascades":result["cascades"],"is_free":result["is_free"],
             "steps":result["steps"],"final_board":result["final_board"]
         }
