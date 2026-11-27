@@ -62,6 +62,12 @@ def initialize_database() -> None:
             ON transactions(sender_user_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS transactions_recipient_created_idx
             ON transactions(recipient_user_id, created_at DESC);
+        CREATE TABLE IF NOT EXISTS wallet_settings (
+            user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            card_frozen BOOLEAN NOT NULL DEFAULT FALSE,
+            card_limit_kopecks BIGINT NOT NULL DEFAULT 5000000 CHECK (card_limit_kopecks >= 0),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
         """)
         conn.commit()
 
@@ -307,4 +313,48 @@ def transfer(
         "amount_kopecks": body.amount_kopecks,
         "balance_kopecks": debit["balance_kopecks"],
         "created_at": tx["created_at"].isoformat(),
+    }
+
+
+class WalletSettingsRequest(BaseModel):
+    card_frozen: bool
+    card_limit_kopecks: int = Field(ge=0, le=1_000_000_000)
+
+
+@app.get("/v1/wallet/settings")
+def get_wallet_settings(user: User):
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO wallet_settings(user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+            (user["id"],),
+        )
+        row = conn.execute(
+            "SELECT card_frozen, card_limit_kopecks, updated_at FROM wallet_settings WHERE user_id = %s",
+            (user["id"],),
+        ).fetchone()
+    return {
+        "card_frozen": row["card_frozen"],
+        "card_limit_kopecks": row["card_limit_kopecks"],
+        "updated_at": row["updated_at"].isoformat(),
+    }
+
+
+@app.put("/v1/wallet/settings")
+def update_wallet_settings(body: WalletSettingsRequest, user: User):
+    with pool.connection() as conn:
+        row = conn.execute(
+            """INSERT INTO wallet_settings(user_id, card_frozen, card_limit_kopecks)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (user_id) DO UPDATE SET
+                 card_frozen = EXCLUDED.card_frozen,
+                 card_limit_kopecks = EXCLUDED.card_limit_kopecks,
+                 updated_at = NOW()
+               RETURNING card_frozen, card_limit_kopecks, updated_at""",
+            (user["id"], body.card_frozen, body.card_limit_kopecks),
+        ).fetchone()
+        conn.commit()
+    return {
+        "card_frozen": row["card_frozen"],
+        "card_limit_kopecks": row["card_limit_kopecks"],
+        "updated_at": row["updated_at"].isoformat(),
     }
