@@ -672,7 +672,10 @@ private fun TransferScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 10.dp))
                 Field("ID аккаунта или имя пользователя", query, { query = it.trim().take(32); selected = null; localError = "" }, Icons.Default.Person)
                 Row(Modifier.fillMaxWidth().padding(top = 9.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Button(onClick = { search(query) }, enabled = query.trim().length >= 3 && !searching,
+                    Button(onClick = {
+                        if (query.matches(Regex("[0-9]{6,12}"))) selected = Recipient(query, "Получатель по ID")
+                        else search(query)
+                    }, enabled = query.trim().length >= 3 && !searching,
                         modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Purple)) {
                         if (searching) CircularProgressIndicator(Modifier.size(18.dp), color = White, strokeWidth = 2.dp)
