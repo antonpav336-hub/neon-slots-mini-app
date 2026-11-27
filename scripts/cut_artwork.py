@@ -69,6 +69,9 @@ def main():
                 x0=round(col*w/cols); x1=round((col+1)*w/cols)
                 y0=round(row*h/rows); y1=round((row+1)*h/rows)
                 cell=sheet.crop((x0,y0,x1,y1))
+                # Case labels sit below the artwork; exclude that caption strip.
+                if folder=="cases":
+                    cell=cell.crop((0,0,cell.width,round(cell.height*0.78)))
                 cell=remove_checkerboard(cell)
                 out=trim_and_pad(cell)
                 dest=ASSETS/folder/f"r{row}c{col}.png"
