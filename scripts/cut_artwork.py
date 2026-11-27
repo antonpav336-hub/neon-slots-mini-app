@@ -1,94 +1,130 @@
 #!/usr/bin/env python3
-"""Cut the committed artwork sheets into independent transparent PNG assets."""
+"""Extract isolated transparent artwork from the committed source sheets."""
 from pathlib import Path
-from PIL import Image
 from collections import deque
-import math
+from PIL import Image
+import colorsys
 
-ROOT=Path(__file__).resolve().parents[1]
-ASSETS=ROOT/"assets"
-CASE_ALIASES={(0,0):("starter",),(0,1):("neon",),(0,2):("royal",),(1,0):("crystal",),(1,1):("cosmic","legend")}
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "assets" / "clean"
 
-SHEETS=[
- ("1795742852204.jpg","slots/olympus",5,3),
- ("1795742875494.jpg","slots/sweet",5,3),
- ("1795742884706.jpg","slots/sugar",4,3),
- ("1795742892974.jpg","cases",3,2),
- ("1795742902056.jpg","rewards",3,2),
+SHEETS = [
+    ("1795742852204.jpg", "slots/olympus", 5, 3),
+    ("1795742875494.jpg", "slots/sweet", 5, 3),
+    ("1795742884706.jpg", "slots/sugar", 4, 3),
+    ("1795742892974.jpg", "rewards", 3, 2),
+    ("1795742902056.jpg", "cases", 3, 2),
 ]
+CASE_NAMES = {
+    (0, 0): "starter", (0, 1): "neon", (0, 2): "royal",
+    (1, 0): "crystal", (1, 1): "legend", (1, 2): "cosmic",
+}
 
-def remove_checkerboard(im):
-    im=im.convert("RGBA")
-    px=im.load(); w,h=im.size
-    # The uploaded sheets use a neutral grey/near-black checkerboard.
-    # Only remove neutral pixels that are connected to the cell boundary;
-    # saturated artwork and enclosed neutral details remain intact.
-    seen=bytearray(w*h); q=deque()
-    def is_bg(x,y):
-        r,g,b,a=px[x,y]
-        mx=max(r,g,b); mn=min(r,g,b)
-        lum=(r+g+b)/3
-        return a>0 and (mx-mn)<=20 and 22<=lum<=178
-    def add(x,y):
-        k=y*w+x
-        if not seen[k] and is_bg(x,y):
-            seen[k]=1; q.append((x,y))
+def erase_edge_checker(cell):
+    """Erase only neutral checker pixels connected to the crop edge."""
+    im = cell.convert("RGBA")
+    px = im.load()
+    w, h = im.size
+    seen = bytearray(w * h)
+    q = deque()
+
+    def background(x, y):
+        r, g, b, a = px[x, y]
+        return a > 0 and max(r, g, b) - min(r, g, b) <= 26 and (r + g + b) / 3 <= 218
+
+    def push(x, y):
+        k = y * w + x
+        if not seen[k] and background(x, y):
+            seen[k] = 1
+            q.append((x, y))
+
     for x in range(w):
-        add(x,0); add(x,h-1)
+        push(x, 0); push(x, h - 1)
     for y in range(h):
-        add(0,y); add(w-1,y)
+        push(0, y); push(w - 1, y)
+
     while q:
-        x,y=q.popleft()
-        px[x,y]=(0,0,0,0)
-        if x: add(x-1,y)
-        if x+1<w: add(x+1,y)
-        if y: add(x,y-1)
-        if y+1<h: add(x,y+1)
+        x, y = q.popleft()
+        px[x, y] = (0, 0, 0, 0)
+        if x: push(x - 1, y)
+        if x + 1 < w: push(x + 1, y)
+        if y: push(x, y - 1)
+        if y + 1 < h: push(x, y + 1)
     return im
 
-def trim_and_pad(cell):
-    alpha=cell.getchannel("A")
-    bbox=alpha.getbbox()
-    if not bbox: return Image.new("RGBA",(512,512),(0,0,0,0))
-    obj=cell.crop(bbox)
-    # Keep a generous safety margin so CSS/object-fit never clips an edge.
-    max_side=440
-    scale=min(max_side/obj.width,max_side/obj.height)
-    obj=obj.resize((max(1,round(obj.width*scale)),max(1,round(obj.height*scale))),Image.Resampling.LANCZOS)
-    out=Image.new("RGBA",(512,512),(0,0,0,0))
-    out.alpha_composite(obj,((512-obj.width)//2,(512-obj.height)//2))
-    return out
+def keep_art_components(im):
+    """Drop isolated caption/noise components while preserving multi-part art."""
+    a = im.getchannel("A")
+    w, h = im.size
+    mask = a.load()
+    seen = bytearray(w * h)
+    comps = []
+    for y in range(h):
+        for x in range(w):
+            k = y * w + x
+            if seen[k] or mask[x, y] == 0:
+                continue
+            q = deque([(x, y)])
+            seen[k] = 1
+            area = 0
+            x0 = x1 = x
+            y0 = y1 = y
+            while q:
+                xx, yy = q.popleft()
+                area += 1
+                x0 = min(x0, xx); x1 = max(x1, xx)
+                y0 = min(y0, yy); y1 = max(y1, yy)
+                for nx, ny in ((xx-1,yy),(xx+1,yy),(xx,yy-1),(xx,yy+1)):
+                    if 0 <= nx < w and 0 <= ny < h:
+                        nk = ny*w+nx
+                        if not seen[nk] and mask[nx,ny] > 0:
+                            seen[nk] = 1
+                            q.append((nx,ny))
+            comps.append((area, (x0,y0,x1+1,y1+1)))
+
+    if not comps:
+        return im
+    largest = max(area for area, _ in comps)
+    # Keep substantial detached pieces (sparkles, leaves, candy pieces), not tiny text.
+    keep = [bbox for area, bbox in comps if area >= max(18, largest * 0.035)]
+    cleaned = Image.new("RGBA", im.size, (0,0,0,0))
+    for bbox in keep:
+        part = im.crop(bbox)
+        cleaned.alpha_composite(part, (bbox[0], bbox[1]))
+    return cleaned
+
+def fit_canvas(im):
+    bbox = im.getchannel("A").getbbox()
+    canvas = Image.new("RGBA", (512,512), (0,0,0,0))
+    if not bbox:
+        return canvas
+    obj = im.crop(bbox)
+    scale = min(440 / obj.width, 440 / obj.height)
+    obj = obj.resize((max(1,round(obj.width*scale)), max(1,round(obj.height*scale))), Image.Resampling.LANCZOS)
+    canvas.alpha_composite(obj, ((512-obj.width)//2, (512-obj.height)//2))
+    return canvas
 
 def main():
-    for filename,folder,cols,rows in SHEETS:
-        src=ROOT/filename
-        if not src.exists(): raise SystemExit(f"Missing source sheet: {src}")
-        sheet=Image.open(src).convert("RGB")
-        w,h=sheet.size
-        # Exact equal-cell slicing follows the documented sheet layouts.
+    for filename, folder, cols, rows in SHEETS:
+        source = ROOT / filename
+        if not source.exists():
+            raise SystemExit(f"Missing source sheet: {source}")
+        sheet = Image.open(source).convert("RGB")
+        w, h = sheet.size
         for row in range(rows):
             for col in range(cols):
-                x0=round(col*w/cols); x1=round((col+1)*w/cols)
-                y0=round(row*h/rows); y1=round((row+1)*h/rows)
-                cell=sheet.crop((x0,y0,x1,y1))
-                # Case labels sit below the artwork; exclude that caption strip.
-                if folder=="cases":
-                    cell=cell.crop((0,0,cell.width,round(cell.height*0.78)))
-                cell=remove_checkerboard(cell)
-                out=trim_and_pad(cell)
-                dest=ASSETS/folder/f"r{row}c{col}.png"
-                dest.parent.mkdir(parents=True,exist_ok=True)
-                out.save(dest,optimize=True)
-                if folder=="cases":
-                    for alias in CASE_ALIASES.get((row,col),()):
-                        named=ASSETS/"cases"/f"{alias}.png"
-                        variant=out
-                        if alias=="legend":
-                            hsv=out.convert("HSV")
-                            hp,sp,vp=hsv.split()
-                            hp=hp.point(lambda value:(value+17)%256)
-                            variant=Image.merge("HSV",(hp,sp,vp)).convert("RGBA")
-                        variant.save(named,optimize=True)
-                        print(f"{named.relative_to(ROOT)} {variant.size}")
-                print(f"{dest.relative_to(ROOT)} {out.size}")
-if __name__=="__main__": main()
+                cell = sheet.crop((round(col*w/cols), round(row*h/rows),
+                                   round((col+1)*w/cols), round((row+1)*h/rows)))
+                clean = fit_canvas(keep_art_components(erase_edge_checker(cell)))
+                target = OUT / folder / f"r{row}c{col}.png"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                clean.save(target, optimize=True)
+                if folder == "cases":
+                    name = CASE_NAMES[(row,col)]
+                    named = OUT / "cases" / f"{name}.png"
+                    clean.save(named, optimize=True)
+                    print(f"case {name}: {named.relative_to(ROOT)}")
+                print(f"{target.relative_to(ROOT)} {clean.size} RGBA")
+
+if __name__ == "__main__":
+    main()
