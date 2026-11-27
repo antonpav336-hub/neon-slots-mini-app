@@ -288,20 +288,38 @@ with connect() as _con:
 
 _SLOT_GAMES = {
     "olympus": {"name":"THUNDER GOD","cols":6,"rows":5,"scatter":"⚡",
-        "symbols":["🔵","🟢","🟡","🟣","🔴","🏆","💍","⌛","👑"],
+        "symbols":["🔵","🟢","🟡","🟣","🔴","🏆","💍","⌛","👑"],"weights":[14,14,14,14,14,8,8,7,7],
         "high":["🏆","💍","⌛","👑"],"mult_count":15},
     "sweet": {"name":"SWEET BLAST","cols":6,"rows":5,"scatter":"🍭",
-        "symbols":["🍌","🍇","🍉","🫐","🍎","🟦","🟩","🟪","❤️"],
+        "symbols":["🍌","🍇","🍉","🫐","🍎","🟦","🟩","🟪","❤️"],"weights":[14,14,14,14,14,8,8,7,7],
         "high":["🟦","🟩","🟪","❤️"],"mult_count":13},
     "sugar": {"name":"SUGAR RUSH","cols":7,"rows":7,"scatter":"🚀",
-        "symbols":["🐻","🧸","🐻‍❄️","⭐","🫘","🧡","🍡"],
+        "symbols":["🐻","🧸","🐻‍❄️","⭐","🫘","🧡","🍡"],"weights":[15,15,15,14,14,14,13],
         "high":["⭐","🫘","🧡","🍡"],"mult_count":13},
 }
+# Central game math configuration. Adjust these values here to rebalance every game.
+# Weights are relative; the backend is the only source of RNG and settlement.
+GAME_MATH_CONFIG = {
+    "slots": {
+        "payout_factor": 0.62,
+        "scatter_bps": {"olympus": 30, "sweet": 30, "sugar": 20},
+        "ante_scatter_bps": {"olympus": 60, "sweet": 60, "sugar": 40},
+        "cascade_multiplier_bps": {"olympus": 300, "sweet": 500},
+        "multiplier_weights": [60, 22, 9, 4, 2, 1.2, 0.8, 0.5, 0.25, 0.15, 0.1, 0.05, 0.025, 0.01, 0.005],
+        "scatter_payouts": {4: 2, 5: 4, 6: 8},
+    },
+    "cases": {
+        "outcomes": [(1500, 0.0), (4500, 0.5), (7500, 0.8), (9200, 1.0), (9900, 1.5), (10000, 5.0)]
+    },
+    "mines": {"cashout_rtp": 0.90},
+    "classic_slots": {"pair_multiplier": 0.7, "triple_multiplier": 3.0, "jackpot_multiplier": 10.0}
+}
 _SLOT_MULTS = [2,3,4,5,6,8,10,12,15,20,25,50,100,250,500]
-_SLOT_PAYOUT_FACTOR = 0.75
+_SLOT_PAYOUT_FACTOR = GAME_MATH_CONFIG["slots"]["payout_factor"]
 
 def _slot_weighted_symbol(game):
-    return secrets.choice(game["symbols"])
+    weights = game.get("weights")
+    return secrets.SystemRandom().choices(game["symbols"], weights=weights, k=1)[0] if weights else secrets.choice(game["symbols"])
 
 def _slot_board(game):
     return [[_slot_weighted_symbol(game) for _ in range(game["cols"])]
@@ -362,7 +380,7 @@ def _slot_symbol_pay(symbol, count, bet, game):
                   else (.25 + max(0,count-8)*.25))
 
 def _slot_pick_mult(game):
-    weights = [22,18,15,12,10,7,5,4,2.5,1.8,1.2,.8,.4,.2,.1][:game["mult_count"]]
+    weights = GAME_MATH_CONFIG["slots"]["multiplier_weights"][:game["mult_count"]]
     return secrets.SystemRandom().choices(_SLOT_MULTS[:game["mult_count"]],weights=weights,k=1)[0]
 
 def _slot_gravity(board, remove, game):
@@ -403,7 +421,7 @@ def _slot_simulate(game_id, game, bet, ante, buy, session):
     if buy:
         target = secrets.randbelow(5 if game_id == "sugar" else 3) + (3 if game_id == "sugar" else 4)
         _slot_place_scatters(board, game, target)
-    elif secrets.randbelow(10000) < (1300 if ante else 650):
+    elif secrets.randbelow(10000) < (GAME_MATH_CONFIG["slots"]["ante_scatter_bps"] if ante else GAME_MATH_CONFIG["slots"]["scatter_bps"])[game_id]:
         low = 3 if game_id == "sugar" else 4
         high = 7 if game_id == "sugar" else 6
         _slot_place_scatters(board, game, low + secrets.randbelow(high-low+1))
@@ -434,9 +452,9 @@ def _slot_simulate(game_id, game, bet, ante, buy, session):
         unique_remove = sorted(set(remove))
         steps.append({"board":[row[:] for row in board],"remove":unique_remove,
                       "spots":cell_hits[:],"cascade":cascades+1})
-        if game_id == "olympus" and secrets.randbelow(10000) < 4800:
+        if game_id == "olympus" and secrets.randbelow(10000) < GAME_MATH_CONFIG["slots"]["cascade_multiplier_bps"]["olympus"]:
             spin_mults.append(_slot_pick_mult(game))
-        elif game_id == "sweet" and bonus_mode and secrets.randbelow(10000) < 4200:
+        elif game_id == "sweet" and bonus_mode and secrets.randbelow(10000) < GAME_MATH_CONFIG["slots"]["cascade_multiplier_bps"]["sweet"]:
             spin_mults.append(_slot_pick_mult(game))
         board = _slot_gravity(board,unique_remove,game)
         cascades += 1
@@ -444,7 +462,7 @@ def _slot_simulate(game_id, game, bet, ante, buy, session):
                       "spots":cell_hits[:],"cascade":cascades,"drop":True})
     scatter_pay = 0
     if game_id != "sugar" and initial_scatter >= 4:
-        scatter_pay = bet * {4:3,5:5}.get(min(initial_scatter,6),100)
+        scatter_pay = bet * GAME_MATH_CONFIG["slots"]["scatter_payouts"].get(min(initial_scatter,6), 0)
     win_total += scatter_pay
     if game_id == "olympus" and win_total > 0:
         if bonus_mode:
@@ -627,14 +645,9 @@ async def cases_open(body: dict, request: Request):
     if not case:
         raise HTTPException(400, "Неизвестный кейс.")
 
-    # Server-side RNG and payout table: 0x 15%, 0.5x 25%, 0.8x 25%,
-    # 1x 20%, 1.5x 12%, 5x 3%.
+    # Centralized server-side case outcome table; the same odds apply to all case tiers.
     roll = secrets.randbelow(10000)
-    outcomes = [
-        (1500, 0.0), (4000, 0.5), (6500, 0.8),
-        (8500, 1.0), (9700, 1.5), (10000, 5.0)
-    ]
-    multiplier = next(mult for ceiling, mult in outcomes if roll < ceiling)
+    multiplier = next(mult for ceiling, mult in GAME_MATH_CONFIG["cases"]["outcomes"] if roll < ceiling)
     payout = int(case["price"] * multiplier)
     now = int(time.time())
 
@@ -905,11 +918,11 @@ async def spin(body: Amount, request: Request):
     symbols = ["🍒","🍋","🍇","🔔","7️⃣"]
     reels = [secrets.choice(symbols) for _ in range(3)]
     if reels == ["7️⃣","7️⃣","7️⃣"]:
-        mult = 10
+        mult = GAME_MATH_CONFIG["classic_slots"]["jackpot_multiplier"]
     elif reels[0] == reels[1] == reels[2]:
-        mult = 5
+        mult = GAME_MATH_CONFIG["classic_slots"]["triple_multiplier"]
     elif len(set(reels)) == 2:
-        mult = 1
+        mult = GAME_MATH_CONFIG["classic_slots"]["pair_multiplier"]
     else:
         mult = 0
     payout = bet * mult
