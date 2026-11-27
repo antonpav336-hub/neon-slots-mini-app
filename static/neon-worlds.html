@@ -88,7 +88,7 @@ async function runSpin(isBuy=false){
  catch(e){$('message').textContent=e.message;if(e.message.toLowerCase().includes('недостаточно'))toast('Недостаточно звёзд');busy=false;syncControls();return}
  setBalance(result.balance);bonus=result.bonus;bonusMode=result.bonus_mode;globalMult=result.global_mult;cellHits=result.steps?.[result.steps.length-1]?.spots||[];
  $('freespins').textContent=bonus;$('bonusCount').textContent=bonus;$('globalMult').textContent=globalMult;$('modeLabel').textContent=bonusMode?'FREE SPINS':'BASE GAME';$('bonusbar').classList.toggle('show',bonusMode);
- if(result.scatters>0)SoundManager.scatter();
+ if(result.scatters>0){SoundManager.scatter();haptic('heavy')}
  const steps=result.steps||[];
  if(steps.length)await animateDrop(steps[0].board,steps[0].spots||[]);
  let winIndex=0,dropIndex=1;
@@ -97,7 +97,7 @@ async function runSpin(isBuy=false){
    if(step.remove&&step.remove.length){winIndex++;await animateWin(step,winIndex)}
    else if(step.drop){await animateDrop(step.board,step.spots||[]);dropIndex++}
  }
- (result.spin_mults||[]).forEach((m,i)=>setTimeout(()=>flyMultiplier(m),i*(turbo?90:180)));
+ (result.spin_mults||[]).forEach((m,i)=>setTimeout(()=>flyMultiplier(m),i*(turbo?90:180)));if(game==='olympus'&&(result.spin_mults||[]).length)zeusStrike();
  if(game==='sugar'&&bonusMode){[...$('grid').children].forEach((el,i)=>{const hits=cellHits[i]||0;if(hits>1){el.classList.add('mult-up');setTimeout(()=>el.classList.remove('mult-up'),500)}})}
  $('win').textContent=fmt(result.payout);$('mult').textContent=result.multiplier?'×'+result.multiplier:'—';
  if((!wasBonusMode&&result.bonus_mode)||(wasBonusMode&&result.bonus>previousBonus))SoundManager.bonus();
