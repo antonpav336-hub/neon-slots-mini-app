@@ -40,7 +40,7 @@ function findAnywhere(board){const counts={};board.flat().forEach((s,i)=>{if(s==
 function findClusters(board){const g=games[game],seen=new Set(),out=[];for(let r=0;r<g.rows;r++)for(let c=0;c<g.cols;c++){let s=board[r][c],start=r*g.cols+c;if(s===g.scatter||seen.has(start))continue;let q=[start],group=[];seen.add(start);while(q.length){let id=q.pop(),rr=Math.floor(id/g.cols),cc=id%g.cols;group.push(id);for(const [nr,nc] of [[rr-1,cc],[rr+1,cc],[rr,cc-1],[rr,cc+1]]){if(nr<0||nc<0||nr>=g.rows||nc>=g.cols)continue;let ni=nr*g.cols+nc;if(!seen.has(ni)&&board[nr][nc]===s){seen.add(ni);q.push(ni)}}}if(group.length>=5)out.push({s,ids:group})}return out}
 function symbolPay(s,count,bet){let high=games[game].high.includes(s);if(game==='sugar'){let base=high?.48:.24;return bet*base*Math.max(1,count/5)**(high?1.7:1.4)}if(count>=12)return bet*(high?12+Math.min(38,(count-12)*4):2+Math.min(8,(count-12)*.8));return bet*(high?1.5+Math.max(0,count-8)*1.6:.25+Math.max(0,count-8)*.25)}
 function scatterCount(board){return board.flat().filter(s=>s===games[game].scatter).length}
-function scatterAward(n,bet){if(n<4)return 0;return bet*({4:3,5:5,6:100}[Math.min(n,6)]||100)}
+function scatterAward(n,bet){if(game==='sugar'||n<4)return 0;return bet*({4:3,5:5,6:100}[Math.min(n,6)]||100)}
 function gravity(board,remove){const g=games[game],set=new Set(remove);for(let c=0;c<g.cols;c++){let kept=[];for(let r=g.rows-1;r>=0;r--)if(!set.has(r*g.cols+c))kept.push(board[r][c]);while(kept.length<g.rows)kept.push(weightedSymbol());for(let r=g.rows-1,k=0;r>=0;r--,k++)board[r][c]=kept[k]}hapticDrop()}
 function zeusStrike(){if(game!=='olympus')return;$('zeus').classList.remove('strike');void $('zeus').offsetWidth;$('zeus').classList.add('strike');haptic('heavy')}
 function setMode(){const g=games[game];$('gameTitle').textContent=g.title;$('gameSub').textContent=g.sub;$('fieldLabel').textContent=g.cols+' × '+g.rows+(game==='sugar'?' · CLUSTER PAYS':' · PAY ANYWHERE');$('zeus').style.display=game==='olympus'?'flex':'none';$('modeLabel').textContent=bonusMode?'FREE SPINS':'BASE GAME';$('bonusbar').classList.toggle('show',bonusMode);$('globalMult').textContent=globalMult;draw(matrix(),[],cellHits)}
@@ -69,14 +69,14 @@ async function runSpin(isBuy=false){
   }
  }
  let scatterPay=scatterAward(boardScatter,bet);winTotal+=scatterPay;
- if(game==='olympus'&&spinMults.length&&winTotal>0){allMult=spinMults.reduce((a,b)=>a+b,0);winTotal*=allMult;zeusStrike()}
+ if(game==='olympus'&&spinMults.length&&winTotal>0){const spinMult=spinMults.reduce((a,b)=>a+b,0);if(bonusMode){globalMult+=spinMult;allMult=globalMult;winTotal*=globalMult}else{allMult=spinMult;winTotal*=spinMult;zeusStrike()}}
  if(game==='sweet'&&bonusMode&&spinMults.length&&winTotal>0){allMult=spinMults.reduce((a,b)=>a+b,0);winTotal*=allMult}
- if(game==='olympus'&&bonusMode&&spinMults.length&&winTotal>0){globalMult+=spinMults.reduce((a,b)=>a+b,0);allMult=globalMult;winTotal*=globalMult}
- if(game==='sugar'&&bonusMode&&winTotal>0){allMult=cellHits.reduce((a,b)=>a+(b>1?Math.pow(2,b-1):0),0);if(allMult)winTotal*=allMult}
+ 
+ if(game==='sugar'&&bonusMode&&winTotal>0){allMult=cellHits.reduce((a,b)=>a+(b>1?Math.pow(2,b-1):0),0)}
  winTotal=Math.floor(winTotal);credits+=winTotal;save();$('win').textContent=fmt(winTotal);$('mult').textContent=allMult?'×'+allMult:'—';
  let retrigger=game==='sugar'?boardScatter>=3:boardScatter>=3;
  if(boardScatter>=4&&!bonusMode){startBonus(scatterSpins(boardScatter))}
- else if(bonusMode&&retrigger){bonus+=5;$('message').textContent='🎉 RETRIGGER +5 FREE SPINS'}
+ else if(bonusMode&&retrigger){const extra=game==='sugar'?scatterSpins(boardScatter):5;bonus+=extra;$('message').textContent='🎉 RETRIGGER +'+extra+' FREE SPINS'}
  else if(!bonusMode&&boardScatter>=3&&game==='sugar'){startBonus(scatterSpins(boardScatter))}
  if(bonusMode&&bonus===0){bonusMode=false;globalMult=0;if(game==='sugar')cellHits=[];$('message').textContent='Бонус завершён · выигрыш '+fmt(winTotal)+' ✦';setMode()}
  else if($('message').textContent.indexOf('RETRIGGER')<0&&$('message').textContent.indexOf('БОНУС')<0){$('message').textContent=winTotal?'✨ ВЫИГРЫШ +'+fmt(winTotal)+' ✦':'Каскад завершён · попробуй ещё раз'}
