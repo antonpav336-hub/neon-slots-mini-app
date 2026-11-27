@@ -1,5 +1,13 @@
 package com.neonwallet.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -145,6 +153,37 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
     var error by remember { mutableStateOf("") }
     var tab by remember { mutableIntStateOf(0) }
     var transferOpen by remember { mutableStateOf(false) }
+    var qrRecipient by remember { mutableStateOf("") }
+
+    val qrScanner = rememberLauncherForActivityResult(ScanContract()) { scanResult ->
+        val raw = scanResult.contents.orEmpty()
+        if (raw.isNotBlank()) {
+            val parsed = runCatching { Uri.parse(raw).getQueryParameter("account") }.getOrNull()
+            val candidate = (parsed ?: raw).trim()
+            if (candidate.matches(Regex("[0-9]{6,12}"))) {
+                qrRecipient = candidate
+                transferOpen = true
+            } else {
+                error = "QR-код не распознан. Нужен QR NEON WALLET с ID получателя."
+            }
+        }
+    }
+    val cameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            qrScanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                .setPrompt("Наведите камеру на QR-код NEON WALLET")
+                .setBeepEnabled(false).setOrientationLocked(false))
+        } else error = "Для сканирования QR нужен доступ к камере."
+    }
+    val startQrScan = {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            qrScanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                .setPrompt("Наведите камеру на QR-код NEON WALLET")
+                .setBeepEnabled(false).setOrientationLocked(false))
+        } else cameraPermission.launch(Manifest.permission.CAMERA)
+    }
 
     fun refresh(t: String) {
         busy = true
@@ -223,7 +262,8 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                         }
                         BottomBar(tab) { tab = it }
                     }
-                    if (transferOpen) TransferDialog(wallet?.balance ?: 0L, busy, { transferOpen = false }) { recipient, amount ->
+                    if (transferOpen) TransferDialog(wallet?.balance ?: 0L, busy, { transferOpen = false },
+                        startQrScan, qrRecipient) { recipient, amount ->
                         val current = token ?: return@TransferDialog
                         busy = true
                         async({ WalletApi.transfer(current, recipient, amount) }) { result ->
@@ -408,9 +448,13 @@ private fun ProfileRow(icon: androidx.compose.ui.graphics.vector.ImageVector, ti
 
 @Composable
 private fun TransferDialog(balance: Long, busy: Boolean, close: () -> Unit,
+                           scanQr: () -> Unit, scannedRecipient: String,
                            send: (String, Long) -> Unit) {
     var recipient by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
+    LaunchedEffect(scannedRecipient) {
+        if (scannedRecipient.isNotBlank()) recipient = scannedRecipient
+    }
     val rubles = amount.toLongOrNull() ?: 0L
     val valid = recipient.length in 6..12 && recipient.all(Char::isDigit) &&
         rubles > 0 && rubles <= balance / 100
@@ -421,6 +465,12 @@ private fun TransferDialog(balance: Long, busy: Boolean, close: () -> Unit,
                 Text("Перевод по ID NEON WALLET", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 12.dp))
                 Field("ID получателя", recipient, { recipient = it.filter(Char::isDigit).take(12) },
                     Icons.Default.Person, KeyboardType.Number)
+                OutlinedButton(onClick = scanQr, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    shape = RoundedCornerShape(12.dp)) {
+                    Icon(Icons.Default.QrCodeScanner, null, tint = Lavender)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Сканировать QR-код", color = Lavender)
+                }
                 Spacer(Modifier.height(10.dp))
                 Field("Сумма в ₽", amount, { amount = it.filter(Char::isDigit).take(8) },
                     Icons.Default.CurrencyRuble, KeyboardType.Number)
