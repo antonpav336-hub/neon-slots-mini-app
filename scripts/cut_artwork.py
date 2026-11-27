@@ -7,6 +7,8 @@ import math
 
 ROOT=Path(__file__).resolve().parents[1]
 ASSETS=ROOT/"assets"
+CASE_ALIASES={(0,0):("starter",),(0,1):("neon",),(0,2):("royal",),(1,0):("crystal",),(1,1):("cosmic","legend")}
+
 SHEETS=[
  ("1795742852204.jpg","slots/olympus",5,3),
  ("1795742875494.jpg","slots/sweet",5,3),
@@ -77,5 +79,16 @@ def main():
                 dest=ASSETS/folder/f"r{row}c{col}.png"
                 dest.parent.mkdir(parents=True,exist_ok=True)
                 out.save(dest,optimize=True)
+                if folder=="cases":
+                    for alias in CASE_ALIASES.get((row,col),()):
+                        named=ASSETS/"cases"/f"{alias}.png"
+                        variant=out
+                        if alias=="legend":
+                            hsv=out.convert("HSV")
+                            hp,sp,vp=hsv.split()
+                            hp=hp.point(lambda value:(value+17)%256)
+                            variant=Image.merge("HSV",(hp,sp,vp)).convert("RGBA")
+                        variant.save(named,optimize=True)
+                        print(f"{named.relative_to(ROOT)} {variant.size}")
                 print(f"{dest.relative_to(ROOT)} {out.size}")
 if __name__=="__main__": main()
