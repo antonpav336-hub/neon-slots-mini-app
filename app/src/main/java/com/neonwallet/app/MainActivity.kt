@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.graphics.Bitmap
+import android.content.Context
+import android.provider.ContactsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -76,6 +78,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private data class PhoneContact(val name: String, val number: String)
 private data class Account(val id: String, val username: String, val email: String)
 private data class Wallet(val id: String, val balance: Long)
 private data class Tx(val id: String, val title: String, val date: String, val amount: Long, val incoming: Boolean)
@@ -159,6 +162,18 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
     var transferOpen by remember { mutableStateOf(false) }
     var ownQrOpen by remember { mutableStateOf(false) }
     var qrRecipient by remember { mutableStateOf("") }
+    var phoneContacts by remember { mutableStateOf<List<PhoneContact>>(emptyList()) }
+    var contactsAllowed by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED)
+    }
+    val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        contactsAllowed = granted
+        if (granted) {
+            async({ readPhoneContacts(context) }) { result ->
+                phoneContacts = result.getOrDefault(emptyList())
+            }
+        } else error = "Доступ к контактам не разрешён."
+    }
 
     val qrScanner = rememberLauncherForActivityResult(ScanContract()) { scanResult ->
         val raw = scanResult.contents.orEmpty()
@@ -224,6 +239,13 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
         if (token == null) page = "auth"
         else if (page == "loading") refresh(token!!)
     }
+    LaunchedEffect(contactsAllowed) {
+        if (contactsAllowed) {
+            async({ readPhoneContacts(context) }) { result ->
+                phoneContacts = result.getOrDefault(emptyList())
+            }
+        }
+    }
 
     MaterialTheme(colorScheme = darkColorScheme(
         background = Bg, surface = Panel, primary = Purple, onPrimary = White,
@@ -256,6 +278,9 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                             when (tab) {
                                 0 -> HomeScreen(account, wallet, txs, busy, { transferOpen = true }, { token?.let { refresh(it) } }, { ownQrOpen = true })
                                 1 -> HistoryScreen(txs)
+                                2 -> ContactsScreen(phoneContacts, contactsAllowed) {
+                                    contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+                                }
                                 else -> ProfileScreen(account) {
                                     prefs.edit().remove("access_token").remove("pin_salt").remove("pin_hash").apply()
                                     token = null
@@ -453,6 +478,75 @@ private fun HistoryScreen(txs: List<Tx>) {
 }
 
 @Composable
+private fun ContactsScreen(contacts: List<PhoneContact>, permissionGranted: Boolean, requestPermission: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(22.dp)) {
+            Text("Контакты", color = White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text("Люди из телефонной книги", color = Muted, fontSize = 12.sp,
+                modifier = Modifier.padding(top = 5.dp))
+        }
+        if (!permissionGranted) {
+            Column(Modifier.fillMaxWidth().padding(20.dp).clip(RoundedCornerShape(22.dp))
+                .background(Panel).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Contacts, null, tint = Lavender, modifier = Modifier.size(36.dp))
+                Text("Разреши доступ к контактам", color = White, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 12.dp))
+                Text("Контакты будут прочитаны только на устройстве и не отправляются на сервер.",
+                    color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                Button(onClick = requestPermission, modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple)) {
+                    Text("Разрешить доступ")
+                }
+            }
+        } else if (contacts.isEmpty()) {
+            EmptyState("Контакты не найдены", "В телефонной книге пока нет сохранённых номеров")
+        } else {
+            LazyColumn(contentPadding = PaddingValues(bottom = 20.dp)) {
+                items(contacts, key = { it.number }) { contact ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(15.dp)).background(Panel).padding(13.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(42.dp).clip(CircleShape).background(Purple.copy(alpha = .2f)),
+                            contentAlignment = Alignment.Center) {
+                            Text(contact.name.take(1).uppercase(), color = Lavender, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(contact.name, color = White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(contact.number, color = Muted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+        Text("Для виртуального перевода нужен ID NEON WALLET или QR-код получателя.",
+            color = Muted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp))
+    }
+}
+
+private fun readPhoneContacts(context: Context): List<PhoneContact> {
+    val result = mutableListOf<PhoneContact>()
+    val projection = arrayOf(
+        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+        ContactsContract.CommonDataKinds.Phone.NUMBER
+    )
+    context.contentResolver.query(
+        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+        projection, null, null,
+        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE LOCALIZED ASC"
+    )?.use { cursor ->
+        val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+        val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+        while (cursor.moveToNext()) {
+            val name = if (nameIndex >= 0) cursor.getString(nameIndex).orEmpty() else ""
+            val number = if (numberIndex >= 0) cursor.getString(numberIndex).orEmpty() else ""
+            if (name.isNotBlank() && number.isNotBlank()) result.add(PhoneContact(name, number))
+        }
+    }
+    return result.distinctBy { it.number }.take(500)
+}
+
+@Composable
 private fun ProfileScreen(account: Account?, logout: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(22.dp)) {
         Text("Профиль", color = White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
@@ -601,7 +695,8 @@ private fun BottomBar(selected: Int, select: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth().background(Color(0xFF100C18)).navigationBarsPadding()
         .padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
         val entries = listOf(Triple(Icons.Default.Home, "Главная", 0),
-            Triple(Icons.Default.ReceiptLong, "История", 1), Triple(Icons.Default.Person, "Профиль", 2))
+            Triple(Icons.Default.ReceiptLong, "История", 1), Triple(Icons.Default.Contacts, "Контакты", 2),
+            Triple(Icons.Default.Person, "Профиль", 3))
         entries.forEach { entry ->
             Column(Modifier.weight(1f).clip(RoundedCornerShape(13.dp)).clickable { select(entry.third) }
                 .padding(vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
