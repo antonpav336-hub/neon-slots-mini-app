@@ -3,11 +3,14 @@ package com.neonwallet.app
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -28,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.*
@@ -153,6 +157,7 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
     var error by remember { mutableStateOf("") }
     var tab by remember { mutableIntStateOf(0) }
     var transferOpen by remember { mutableStateOf(false) }
+    var ownQrOpen by remember { mutableStateOf(false) }
     var qrRecipient by remember { mutableStateOf("") }
 
     val qrScanner = rememberLauncherForActivityResult(ScanContract()) { scanResult ->
@@ -249,7 +254,7 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                     Column(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(1f)) {
                             when (tab) {
-                                0 -> HomeScreen(account, wallet, txs, busy, { transferOpen = true }, { token?.let { refresh(it) } })
+                                0 -> HomeScreen(account, wallet, txs, busy, { transferOpen = true }, { token?.let { refresh(it) } }, { ownQrOpen = true })
                                 1 -> HistoryScreen(txs)
                                 else -> ProfileScreen(account) {
                                     prefs.edit().remove("access_token").remove("pin_salt").remove("pin_hash").apply()
@@ -275,6 +280,7 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                             }.onFailure { error = it.message ?: "Перевод не выполнен" }
                         }
                     }
+                    if (ownQrOpen && account != null) MyQrDialog(account.id) { ownQrOpen = false }
                     if (error.isNotBlank()) AlertDialog(
                         onDismissRequest = { error = "" }, containerColor = Panel,
                         title = { Text("NEON WALLET", color = White) },
@@ -334,7 +340,7 @@ private fun AuthScreen(busy: Boolean, error: String,
 
 @Composable
 private fun HomeScreen(account: Account?, wallet: Wallet?, txs: List<Tx>, busy: Boolean,
-                       transfer: () -> Unit, refresh: () -> Unit) {
+                       transfer: () -> Unit, refresh: () -> Unit, myQr: () -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
             Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -375,6 +381,13 @@ private fun HomeScreen(account: Account?, wallet: Wallet?, txs: List<Tx>, busy: 
                         Spacer(Modifier.width(8.dp))
                         Text("Перевести средства", fontWeight = FontWeight.Bold)
                     }
+                    Spacer(Modifier.height(9.dp))
+                    OutlinedButton(onClick = myQr, modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(15.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Lavender.copy(alpha = .65f))) {
+                        Icon(Icons.Default.QrCode2, null, tint = Lavender)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Мой QR-код", color = Lavender)
+                    }
                 }
             }
         }
@@ -389,6 +402,38 @@ private fun HomeScreen(account: Account?, wallet: Wallet?, txs: List<Tx>, busy: 
         if (txs.isEmpty()) item { EmptyState("Пока нет операций", "История переводов появится здесь") }
         else items(txs.take(5), key = { it.id }) { TransactionRow(it) }
     }
+}
+
+@Composable
+private fun MyQrDialog(accountId: String, close: () -> Unit) {
+    val bitmap = remember(accountId) {
+        runCatching {
+            val matrix = QRCodeWriter().encode(
+                "neonwallet://pay?account=$accountId", BarcodeFormat.QR_CODE, 640, 640
+            )
+            Bitmap.createBitmap(640, 640, Bitmap.Config.ARGB_8888).apply {
+                for (x in 0 until 640) for (y in 0 until 640) {
+                    setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                }
+            }
+        }.getOrNull()
+    }
+    AlertDialog(
+        onDismissRequest = close, containerColor = Panel,
+        title = { Text("Мой QR-код", color = White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (bitmap != null) {
+                    Image(bitmap.asImageBitmap(), contentDescription = "QR-код NEON WALLET",
+                        modifier = Modifier.fillMaxWidth().padding(8.dp).clip(RoundedCornerShape(12.dp)))
+                }
+                Text("ID аккаунта: $accountId", color = Lavender, fontSize = 12.sp)
+                Text("Другой пользователь может отсканировать код для перевода виртуальных средств.",
+                    color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+        },
+        confirmButton = { TextButton(onClick = close) { Text("Готово", color = Lavender) } }
+    )
 }
 
 @Composable
