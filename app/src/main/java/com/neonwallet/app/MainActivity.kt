@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.content.Context
 import android.provider.ContactsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -326,7 +327,7 @@ private fun NeonWalletApp(registerLock: ((() -> Unit) -> Unit)) {
                                     2 -> ContactsScreen(phoneContacts, contactsAllowed) {
                                         contactsPermission.launch(Manifest.permission.READ_CONTACTS)
                                     }
-                                    else -> ProfileScreen(account) {
+                                    else -> ProfileScreen(account, prefs) {
                                         prefs.edit().remove("access_token").remove("pin_salt").remove("pin_hash").apply()
                                         token = null
                                         account = null
@@ -581,13 +582,55 @@ private fun readPhoneContacts(context: Context): List<PhoneContact> {
 }
 
 @Composable
-private fun ProfileScreen(account: Account?, logout: () -> Unit) {
+private fun ProfileScreen(account: Account?, prefs: android.content.SharedPreferences, logout: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var avatarUri by remember {
+        mutableStateOf(prefs.getString("avatar_uri", null)?.let { Uri.parse(it) })
+    }
+    var avatarBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            avatarUri = uri
+            prefs.edit().putString("avatar_uri", uri.toString()).apply()
+        }
+    }
+    LaunchedEffect(avatarUri) {
+        val selected = avatarUri
+        if (selected == null) avatarBitmap = null
+        else async({
+            context.contentResolver.openInputStream(selected)?.use { BitmapFactory.decodeStream(it) }
+        }) { result -> avatarBitmap = result.getOrNull() }
+    }
     Column(Modifier.fillMaxSize().padding(22.dp)) {
         Text("Профиль", color = White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
         Text("Настройки аккаунта", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp, bottom = 22.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Panel).padding(18.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            BrandMark(54)
+            Box(
+                Modifier.size(66.dp).clip(CircleShape).background(Color(0xFF30203F))
+                    .clickable { avatarPicker.launch(arrayOf("image/*")) },
+                contentAlignment = Alignment.Center
+            ) {
+                if (avatarBitmap != null) {
+                    Image(
+                        avatarBitmap!!.asImageBitmap(),
+                        contentDescription = "Аватар профиля",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                } else {
+                    Icon(Icons.Default.Person, null, tint = Lavender, modifier = Modifier.size(34.dp))
+                }
+                Box(
+                    Modifier.align(Alignment.BottomEnd).size(23.dp).clip(CircleShape)
+                        .background(Purple).border(1.dp, Panel, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Default.Edit, null, tint = White, modifier = Modifier.size(13.dp)) }
+            }
             Spacer(Modifier.width(14.dp))
             Column {
                 Text(account?.username ?: "NEON USER", color = White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -595,7 +638,10 @@ private fun ProfileScreen(account: Account?, logout: () -> Unit) {
                 Text("ID " + (account?.id ?: "—"), color = Lavender, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
             }
         }
-        Spacer(Modifier.height(14.dp))
+        Text(
+            "Нажми на фото, чтобы выбрать аватар из галереи. Изображение хранится только на этом устройстве.",
+            color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 10.dp, bottom = 10.dp)
+        )
         ProfileRow(Icons.Default.Security, "Безопасность", "Защищённая серверная авторизация")
         ProfileRow(Icons.Default.Storage, "Данные кошелька", "Баланс и операции хранятся на сервере")
         ProfileRow(Icons.Default.Info, "О приложении", "NEON WALLET")
