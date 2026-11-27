@@ -73,6 +73,7 @@ async def lifespan(fastapi_app):
 
 app = FastAPI(title="Neon Slots Mini App", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+app.mount("/assets", StaticFiles(directory=ROOT / "assets"), name="assets")
 
 def connect():
     con = sqlite3.connect(DB_PATH, timeout=15)
