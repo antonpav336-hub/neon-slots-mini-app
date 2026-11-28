@@ -25,7 +25,7 @@ JWT_ALGORITHM = "HS256"
 TOKEN_TTL_HOURS = int(os.getenv("TOKEN_TTL_HOURS", "168"))
 REGISTRATION_BONUS_KOPECKS = int(os.getenv("REGISTRATION_BONUS_KOPECKS", "500000"))
 
-app = FastAPI(title="NEON WALLET API", version="1.0.0")
+app = FastAPI(title="NEON WALLET API", version="1.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
