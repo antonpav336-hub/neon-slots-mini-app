@@ -16,9 +16,9 @@ from psycopg.types.json import Jsonb
 MAX_BET = 100_000_000_000
 MAX_PAYOUT = 9_000_000_000_000_000
 CASES = {
-    "neon": {"price": 100_00, "items": [(0.55, 50_00), (0.28, 100_00), (0.12, 250_00), (0.045, 1000_00), (0.005, 10000_00)]},
-    "cyber": {"price": 500_00, "items": [(0.50, 100_00), (0.30, 250_00), (0.15, 750_00), (0.045, 5000_00), (0.005, 50000_00)]},
-    "quantum": {"price": 2500_00, "items": [(0.50, 500_00), (0.30, 1500_00), (0.15, 5000_00), (0.045, 25000_00), (0.005, 250000_00)]},
+    "neon": {"price": 100_00, "items": [(0.55, 25_00), (0.28, 50_00), (0.12, 100_00), (0.045, 500_00), (0.005, 5000_00)]},
+    "cyber": {"price": 500_00, "items": [(0.50, 100_00), (0.30, 250_00), (0.15, 750_00), (0.045, 2500_00), (0.005, 25000_00)]},
+    "quantum": {"price": 2500_00, "items": [(0.50, 500_00), (0.30, 1250_00), (0.15, 3750_00), (0.045, 12500_00), (0.005, 125000_00)]},
 }
 SYMBOLS = [
     {"id": "crystal", "weight": 30, "mult": 0.35},
@@ -349,7 +349,15 @@ def register_extended_routes(app: FastAPI, pool, current_user):
                     line=int(body.bet_kopecks*sym["mult"]*(hit["length"]-2)*multiplier)
                     total_payout+=line
                     for x in range(hit["start"],hit["start"]+hit["length"]):cleared.add((hit["row"],x))
-                cascades.append({"index":cascade_index+1,"wins":hits,"cleared":len(cleared),"multiplier":multiplier})
+                bonus_multiplier=1
+                for y in range(6):
+                    for x in range(6):
+                        token=grid[y][x]
+                        if token in ("x2","x5"):
+                            bonus_multiplier*=2 if token=="x2" else 5
+                            cleared.add((y,x))
+                multiplier=min(multiplier*bonus_multiplier,25)
+                cascades.append({"index":cascade_index+1,"wins":hits,"cleared":len(cleared),"multiplier":multiplier,"bonus_multiplier":bonus_multiplier})
                 for x in range(6):
                     remaining=[grid[y][x] for y in range(6) if (y,x) not in cleared]
                     refill=[symbol() for _ in range(6-len(remaining))]
