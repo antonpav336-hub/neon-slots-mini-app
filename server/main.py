@@ -50,8 +50,23 @@ def initialize_database() -> None:
             username VARCHAR(32) UNIQUE NOT NULL,
             email VARCHAR(254) UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            banned_at TIMESTAMPTZ,
+            ban_reason VARCHAR(240),
+            banned_by BIGINT REFERENCES users(id)
+        );
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR(240);
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_by BIGINT REFERENCES users(id);
+        CREATE TABLE IF NOT EXISTS admin_audit_logs (
+            id BIGSERIAL PRIMARY KEY,
+            admin_user_id BIGINT NOT NULL REFERENCES users(id),
+            target_user_id BIGINT REFERENCES users(id),
+            action VARCHAR(40) NOT NULL,
+            details JSONB NOT NULL DEFAULT '{}'::jsonb,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        CREATE INDEX IF NOT EXISTS admin_audit_created_idx ON admin_audit_logs(created_at DESC);
         CREATE TABLE IF NOT EXISTS wallets (
             user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
             balance_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (balance_kopecks >= 0),
@@ -270,11 +285,13 @@ def current_user(authorization: Annotated[str | None, Header()] = None) -> dict:
         raise HTTPException(status_code=401, detail="Сессия недействительна или истекла")
     with pool.connection() as conn:
         user = conn.execute(
-            "SELECT id, account_id, username, email, created_at FROM users WHERE id = %s",
+            "SELECT id, account_id, username, email, created_at, banned_at, ban_reason FROM users WHERE id = %s",
             (user_id,),
         ).fetchone()
     if not user:
         raise HTTPException(status_code=401, detail="Пользователь не найден")
+    if user.get("banned_at") is not None:
+        raise HTTPException(status_code=403, detail="Аккаунт заблокирован. Обратись в поддержку.")
     return user
 
 
@@ -302,27 +319,183 @@ def public_user(user: dict) -> dict:
 @app.get("/admin", response_class=HTMLResponse)
 def admin_panel():
     return HTMLResponse(r"""
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090711"><title>NEON WALLET Admin</title>
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090711"><title>NEON CONTROL</title>
 <style>
-:root{color-scheme:dark;--bg:#090711;--panel:#141020;--line:#302342;--purple:#a855f7;--pink:#ec4899;--muted:#a79bb8;--text:#f7f1ff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#39205b 0,transparent 55%),var(--bg);color:var(--text);font:15px Inter,system-ui,sans-serif;min-height:100vh;padding:28px 16px}main{width:min(760px,100%);margin:0 auto}.brand{font-weight:900;letter-spacing:3px;color:#d9b8ff;font-size:13px}.brand span{color:var(--pink)}h1{font-size:30px;margin:12px 0 6px}.sub{color:var(--muted);margin:0 0 24px}.panel{background:linear-gradient(145deg,#191326,#100d19);border:1px solid var(--line);border-radius:20px;padding:22px;margin:14px 0;box-shadow:0 16px 50px #0005}.panel h2{font-size:17px;margin:0 0 16px}.field{display:grid;gap:7px;margin:13px 0}.field label{font-size:13px;color:#c9bdd7}.field input{width:100%;height:48px;border-radius:12px;border:1px solid #443455;background:#0b0911;color:white;padding:0 14px;font-size:16px;outline:none}.field input:focus{border-color:var(--purple);box-shadow:0 0 0 3px #a855f722}button{height:48px;border:0;border-radius:12px;padding:0 18px;background:linear-gradient(100deg,#9333ea,#db2777);color:white;font-weight:800;font-size:15px;width:100%;cursor:pointer;margin-top:8px}button:disabled{opacity:.55;cursor:wait}.muted{color:var(--muted);font-size:13px}.status{padding:12px;border-radius:12px;background:#21182c;margin-top:14px;display:none;overflow-wrap:anywhere}.status.error,.status.ok{display:block}.status.error{color:#ff9eae;background:#351521}.status.ok{color:#b8ffd9;background:#123025}.hidden{display:none!important}.user{border:1px solid #3b2b4d;border-radius:14px;padding:15px;margin-top:15px}.balance{font-size:26px;font-weight:900;color:#d9b8ff;margin:8px 0}.row{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}@media(max-width:520px){body{padding:20px 12px}.panel{padding:17px}h1{font-size:26px}}
-</style></head><body><main><div class="brand">NEON <span>WALLET</span> / ADMIN</div><h1>Панель управления</h1><p class="sub">Администрирование виртуальных балансов и операций.</p>
-<section class="panel" id="loginPanel"><h2>Вход администратора</h2><div class="field"><label for="email">Email аккаунта</label><input id="email" type="email" autocomplete="username" placeholder="name@example.com"></div><div class="field"><label for="password">Пароль кошелька</label><input id="password" type="password" autocomplete="current-password"></div><button id="loginBtn">Войти</button><div class="status" id="loginStatus" role="status"></div><p class="muted">Пароль проверяется сервером и не сохраняется в панели.</p></section>
-<section class="panel hidden" id="adminPanel"><div class="row"><h2>Аккаунты</h2><button id="logoutBtn" style="width:auto;margin:0;background:#30243c">Выйти</button></div><div class="field"><label for="accountId">ID аккаунта или email</label><input id="accountId" maxlength="254" placeholder="ID или email"></div><button id="searchBtn">Найти аккаунт</button><div class="status" id="searchStatus" role="status"></div>
-<div class="user hidden" id="userCard"><div class="row"><strong id="userName"></strong><span class="muted" id="userEmail"></span></div><div class="muted" id="userId"></div><div class="balance" id="userBalance">—</div><h2>Зачислить виртуальные ₽</h2><div class="field"><label for="amount">Сумма в рублях</label><input id="amount" type="number" min="0.01" max="1000000" step="0.01" placeholder="100000"></div><div class="field"><label for="reason">Комментарий операции</label><input id="reason" maxlength="140" value="Административное пополнение"></div><button id="creditBtn">Зачислить на баланс</button><div class="status" id="creditStatus" role="status"></div></div></section><p class="muted">Все суммы — виртуальные тестовые средства. Каждое зачисление записывается в историю операций.</p></main>
+:root{color-scheme:dark;--bg:#090711;--panel:#151020;--line:#332443;--purple:#a855f7;--pink:#ec4899;--muted:#a99bb9;--text:#f8f2ff;--green:#55e6a5;--red:#ff647f}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#42215e 0,transparent 58%),var(--bg);color:var(--text);font:14px Inter,system-ui,sans-serif;min-height:100vh;padding:24px 14px}main{width:min(1100px,100%);margin:auto}.brand{font-weight:950;letter-spacing:3px;color:#dfc4ff;font-size:13px}.brand span{color:var(--pink)}h1{font-size:30px;margin:10px 0 4px}.sub,.muted{color:var(--muted)}.sub{margin:0 0 22px}.panel{background:linear-gradient(145deg,#1b1428,#100d18);border:1px solid var(--line);border-radius:18px;padding:19px;margin:13px 0;box-shadow:0 14px 40px #0005}.panel h2{font-size:16px;margin:0 0 14px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.stat{background:#100c18;border:1px solid #342444;border-radius:14px;padding:15px}.stat small{color:var(--muted)}.stat strong{display:block;font-size:24px;margin-top:8px;overflow-wrap:anywhere}.field{display:grid;gap:7px;margin:12px 0}.field label{font-size:12px;color:#cbbbd9}.field input,.field select{height:44px;border-radius:11px;border:1px solid #493657;background:#0b0911;color:white;padding:0 12px;font-size:15px;width:100%}button{min-height:43px;border:0;border-radius:11px;padding:0 15px;background:linear-gradient(100deg,#9333ea,#db2777);color:white;font-weight:800;font-size:14px;cursor:pointer;margin:4px 5px 4px 0}button.secondary{background:#30243c;border:1px solid #493657}button.danger{background:linear-gradient(100deg,#a51f45,#e34265)}button.good{background:linear-gradient(100deg,#087e60,#20b987)}button:disabled{opacity:.5}.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.hidden{display:none!important}.status{padding:11px;border-radius:10px;margin-top:10px;display:none;overflow-wrap:anywhere}.status.error,.status.ok{display:block}.status.error{color:#ffabb8;background:#351521}.status.ok{color:#b8ffd9;background:#123025}.user{border:1px solid #483253;border-radius:14px;padding:15px;margin-top:15px}.balance{font-size:26px;font-weight:900;color:#dfc4ff;margin:8px 0}.pill{display:inline-block;border-radius:30px;padding:5px 9px;background:#20382e;color:#8ef0bc;font-size:11px;font-weight:800}.pill.banned{background:#421c2a;color:#ff9daf}.tabs{display:flex;gap:7px;flex-wrap:wrap;margin:15px 0}.tabs button{background:#21182c}.tabs button.active{background:linear-gradient(100deg,#9333ea,#db2777)}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:620px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #332443;font-size:12px;vertical-align:top}th{color:#cbbbd9}td{color:#eee5f8}.muted{font-size:12px}.split{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dangerText{color:#ff91a5}@media(max-width:650px){body{padding:17px 10px}.panel{padding:14px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stat strong{font-size:20px}.split{grid-template-columns:1fr}h1{font-size:25px}}
+</style></head><body><main><div class="brand">NEON <span>CONTROL</span> / ADMIN</div><h1>Центр управления</h1><p class="sub">Пользователи · кошельки · казино · безопасность</p>
+<section class="panel" id="loginPanel"><h2>Вход администратора</h2><div class="field"><label>Email</label><input id="email" type="email" autocomplete="username"></div><div class="field"><label>Пароль</label><input id="password" type="password" autocomplete="current-password"></div><button id="loginBtn">Войти</button><div class="status" id="loginStatus"></div></section>
+<div id="adminPanel" class="hidden">
+<div class="row"><div class="muted">Сводка системы в реальном времени</div><button class="secondary" id="logoutBtn">Выйти</button></div>
+<section class="panel"><div class="row"><h2>Обзор системы</h2><button class="secondary" id="refreshBtn">Обновить</button></div><div class="grid">
+<div class="stat"><small>Всего аккаунтов</small><strong id="usersCount">—</strong></div><div class="stat"><small>Заблокировано</small><strong id="bannedCount">—</strong></div><div class="stat"><small>Операций за всё время</small><strong id="txCount">—</strong></div><div class="stat"><small>Основные кошельки</small><strong id="walletTotal">—</strong></div><div class="stat"><small>Балансы казино</small><strong id="casinoTotal">—</strong></div><div class="stat"><small>Операций за 24 часа</small><strong id="tx24">—</strong></div>
+</div></section>
+<div class="tabs"><button class="active" data-tab="accounts">Аккаунты</button><button data-tab="transactions">Операции</button><button data-tab="audit">Действия админов</button></div>
+<section class="panel" id="accountsTab"><h2>Поиск пользователя</h2><div class="row"><div class="field" style="flex:1;min-width:210px"><label>ID аккаунта или email</label><input id="accountId" maxlength="254" placeholder="ID или email"></div><button id="searchBtn">Найти</button></div><div class="status" id="searchStatus"></div>
+<div class="user hidden" id="userCard"><div class="row"><div><strong id="userName"></strong><div class="muted" id="userEmail"></div><div class="muted" id="userId"></div></div><span id="userStatus" class="pill">АКТИВЕН</span></div>
+<div class="grid" style="margin-top:13px"><div class="stat"><small>Основной кошелёк</small><strong id="userBalance">—</strong></div><div class="stat"><small>Казино</small><strong id="casinoBalance">—</strong></div><div class="stat"><small>Регистрация</small><strong id="createdAt" style="font-size:14px">—</strong></div></div>
+<div id="banInfo" class="muted dangerText hidden"></div>
+<div class="split"><div><h2 style="margin-top:17px">Административное зачисление</h2><div class="field"><label>Сумма, виртуальные ₽</label><input id="amount" type="number" min=".01" max="1000000" step=".01" placeholder="1000"></div><div class="field"><label>Комментарий</label><input id="reason" maxlength="140" value="Административное пополнение"></div><button id="creditBtn">Зачислить на основной баланс</button><div class="status" id="creditStatus"></div></div>
+<div><h2 style="margin-top:17px">Безопасность аккаунта</h2><div class="field"><label>Причина блокировки</label><input id="banReason" maxlength="240" placeholder="Причина бана"></div><button class="danger" id="banBtn">Заблокировать аккаунт</button><button class="good hidden" id="unbanBtn">Разблокировать аккаунт</button><div class="status" id="banStatus"></div></div></div>
+<h2 style="margin-top:18px">Последние операции пользователя</h2><div class="tablewrap"><table><thead><tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Описание</th></tr></thead><tbody id="userTx"></tbody></table></div></div></section>
+<section class="panel hidden" id="transactionsTab"><div class="row"><h2>Журнал операций</h2><button class="secondary" id="txRefresh">Обновить</button></div><div class="split"><div class="field"><label>Поиск по ID / email / описанию</label><input id="txQuery" placeholder="Поиск"></div><div class="field"><label>Тип операции</label><select id="txKind"><option value="">Все типы</option><option>transfer</option><option>admin_credit</option><option>casino_deposit</option><option>casino_withdraw</option></select></div></div><button id="txSearch">Применить фильтр</button><div class="tablewrap"><table><thead><tr><th>Дата</th><th>Тип</th><th>Отправитель</th><th>Получатель</th><th>Сумма</th><th>Комментарий</th></tr></thead><tbody id="txRows"></tbody></table></div></section>
+<section class="panel hidden" id="auditTab"><div class="row"><h2>Журнал действий администратора</h2><button class="secondary" id="auditRefresh">Обновить</button></div><div class="tablewrap"><table><thead><tr><th>Дата</th><th>Администратор</th><th>Действие</th><th>Аккаунт</th><th>Детали</th></tr></thead><tbody id="auditRows"></tbody></table></div></section>
+</div><p class="muted">Все суммы — виртуальные тестовые средства. Административные действия записываются в журнал.</p></main>
 <script>
 const $=id=>document.getElementById(id);let token=sessionStorage.getItem("neon_admin_token")||"",selected=null;
+const money=n=>(Number(n||0)/100).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2})+" ₽";
+const date=s=>s?new Date(s).toLocaleString("ru-RU"):"—";
 function status(id,msg,kind){const el=$(id);el.textContent=msg;el.className="status "+kind}
 async function api(path,options={}){const res=await fetch(path,{...options,headers:{"Content-Type":"application/json","Authorization":"Bearer "+token,...(options.headers||{})}});const data=await res.json().catch(()=>({detail:"Ошибка ответа сервера"}));if(!res.ok)throw new Error(data.detail||"Ошибка запроса");return data}
-function showAdmin(){$("loginPanel").classList.add("hidden");$("adminPanel").classList.remove("hidden")}
+function showAdmin(){$("loginPanel").classList.add("hidden");$("adminPanel").classList.remove("hidden");refreshAll()}
 function showLogin(){$("adminPanel").classList.add("hidden");$("loginPanel").classList.remove("hidden")}
-async function verify(){if(!token)return showLogin();try{await api("/v1/admin/me");showAdmin()}catch{token="";sessionStorage.removeItem("neon_admin_token");showLogin()}}
-$("loginBtn").onclick=async()=>{const btn=$("loginBtn");btn.disabled=true;try{const r=await fetch("/v1/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:$("email").value,password:$("password").value})});const d=await r.json();if(!r.ok)throw new Error(d.detail||"Не удалось войти");token=d.access_token;sessionStorage.setItem("neon_admin_token",token);$("password").value="";await api("/v1/admin/me");showAdmin()}catch(e){token="";sessionStorage.removeItem("neon_admin_token");status("loginStatus",e.message,"error")}finally{btn.disabled=false}};
-$("logoutBtn").onclick=()=>{token="";sessionStorage.removeItem("neon_admin_token");selected=null;$("userCard").classList.add("hidden");showLogin()};
-$("searchBtn").onclick=async()=>{const btn=$("searchBtn");btn.disabled=true;try{const q=$("accountId").value.trim();const r=await api("/v1/admin/users?q="+encodeURIComponent(q));if(!r.items.length)throw new Error("Аккаунт не найден");selected=r.items[0];$("userName").textContent=selected.username;$("userEmail").textContent=selected.email;$("userId").textContent="ID: "+selected.account_id;$("userBalance").textContent=(selected.balance_kopecks/100).toLocaleString("ru-RU",{minimumFractionDigits:2})+" ₽";$("userCard").classList.remove("hidden");status("searchStatus","Аккаунт найден","ok")}catch(e){selected=null;$("userCard").classList.add("hidden");status("searchStatus",e.message,"error")}finally{btn.disabled=false}};
-$("creditBtn").onclick=async()=>{if(!selected)return;const amount=Number($("amount").value);if(!Number.isFinite(amount)||amount<=0||amount>1000000)return status("creditStatus","Укажи сумму от 0,01 до 1 000 000 ₽","error");if(!confirm("Зачислить "+amount.toLocaleString("ru-RU")+" ₽ на аккаунт "+selected.account_id+"?"))return;const btn=$("creditBtn");btn.disabled=true;try{const r=await api("/v1/admin/wallet/credit",{method:"POST",body:JSON.stringify({account_id:selected.account_id,amount_kopecks:Math.round(amount*100),description:$("reason").value.trim()||"Административное пополнение",request_key:crypto.randomUUID().replaceAll("-","")})});$("userBalance").textContent=(r.balance_kopecks/100).toLocaleString("ru-RU",{minimumFractionDigits:2})+" ₽";status("creditStatus","Зачислено: "+(r.amount_kopecks/100).toLocaleString("ru-RU")+" ₽. Операция № "+r.transaction_id,"ok")}catch(e){status("creditStatus",e.message,"error")}finally{btn.disabled=false}};
-verify();
+async function refreshStats(){const d=await api("/v1/admin/stats");$("usersCount").textContent=Number(d.users_count).toLocaleString("ru-RU");$("bannedCount").textContent=Number(d.banned_count).toLocaleString("ru-RU");$("txCount").textContent=Number(d.transactions_count).toLocaleString("ru-RU");$("walletTotal").textContent=money(d.wallet_total);$("casinoTotal").textContent=money(d.casino_total);$("tx24").textContent=Number(d.transactions_24h).toLocaleString("ru-RU")}
+async function loadTx(){const q=encodeURIComponent($("txQuery").value.trim()),k=encodeURIComponent($("txKind").value);const d=await api("/v1/admin/transactions?q="+q+"&kind="+k+"&limit=100");$("txRows").innerHTML=d.items.map(x=>"<tr><td>"+date(x.created_at)+"</td><td>"+x.kind+"</td><td>"+(x.sender_account_id||"—")+"</td><td>"+(x.recipient_account_id||"—")+"</td><td>"+money(x.amount_kopecks)+"</td><td>"+x.description+"</td></tr>").join("")||'<tr><td colspan="6">Операций нет</td></tr>'}
+async function loadAudit(){const d=await api("/v1/admin/audit");$("auditRows").innerHTML=d.items.map(x=>"<tr><td>"+date(x.created_at)+"</td><td>"+x.admin_account_id+"</td><td>"+x.action+"</td><td>"+(x.target_account_id||"—")+"</td><td>"+JSON.stringify(x.details||{})+"</td></tr>").join("")||'<tr><td colspan="5">Записей пока нет</td></tr>'}
+async function refreshAll(){try{await Promise.all([refreshStats(),loadTx(),loadAudit()])}catch(e){console.error(e)}}
+async function loadUser(){const q=$("accountId").value.trim();if(!q)throw new Error("Введи ID или email");const d=await api("/v1/admin/users?q="+encodeURIComponent(q));if(!d.items.length)throw new Error("Аккаунт не найден");selected=d.items[0];const full=await api("/v1/admin/users/"+encodeURIComponent(selected.account_id));selected=full;$("userName").textContent=full.username;$("userEmail").textContent=full.email;$("userId").textContent="ID: "+full.account_id;$("userBalance").textContent=money(full.balance_kopecks);$("casinoBalance").textContent=money(full.casino_balance_kopecks);$("createdAt").textContent=date(full.created_at);$("userStatus").textContent=full.banned?"ЗАБЛОКИРОВАН":"АКТИВЕН";$("userStatus").className="pill"+(full.banned?" banned":"");$("banBtn").classList.toggle("hidden",full.banned);$("unbanBtn").classList.toggle("hidden",!full.banned);$("banInfo").classList.toggle("hidden",!full.banned);$("banInfo").textContent=full.banned?"Причина: "+(full.ban_reason||"не указана")+" · "+date(full.banned_at):"";$("userTx").innerHTML=full.transactions.map(t=>"<tr><td>"+date(t.created_at)+"</td><td>"+t.kind+"</td><td>"+money(t.amount_kopecks)+"</td><td>"+t.description+"</td></tr>").join("")||'<tr><td colspan="4">Истории пока нет</td></tr>';$("userCard").classList.remove("hidden")}
+$("loginBtn").onclick=async()=>{const b=$("loginBtn");b.disabled=true;try{const r=await fetch("/v1/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:$("email").value,password:$("password").value})});const d=await r.json();if(!r.ok)throw new Error(d.detail||"Не удалось войти");token=d.access_token;sessionStorage.setItem("neon_admin_token",token);$("password").value="";await api("/v1/admin/me");showAdmin()}catch(e){token="";sessionStorage.removeItem("neon_admin_token");status("loginStatus",e.message,"error")}finally{b.disabled=false}};
+$("logoutBtn").onclick=()=>{token="";sessionStorage.removeItem("neon_admin_token");selected=null;showLogin()};
+$("searchBtn").onclick=async()=>{try{await loadUser();status("searchStatus","Аккаунт загружен","ok")}catch(e){$("userCard").classList.add("hidden");status("searchStatus",e.message,"error")}};
+$("creditBtn").onclick=async()=>{if(!selected)return;const amount=Number($("amount").value);if(!Number.isFinite(amount)||amount<=0||amount>1000000)return status("creditStatus","Сумма должна быть от 0,01 до 1 000 000 ₽","error");if(!confirm("Зачислить "+amount+" ₽ аккаунту "+selected.account_id+"?"))return;try{const r=await api("/v1/admin/wallet/credit",{method:"POST",body:JSON.stringify({account_id:selected.account_id,amount_kopecks:Math.round(amount*100),description:$("reason").value.trim()||"Административное пополнение",request_key:crypto.randomUUID().replaceAll("-","")})});status("creditStatus","Зачислено "+money(r.amount_kopecks),"ok");await loadUser();await refreshAll()}catch(e){status("creditStatus",e.message,"error")}};
+$("banBtn").onclick=async()=>{if(!selected)return;const reason=$("banReason").value.trim();if(!reason)return status("banStatus","Укажи причину блокировки","error");if(!confirm("Заблокировать аккаунт "+selected.account_id+"? Пользователь не сможет войти."))return;try{await api("/v1/admin/users/ban",{method:"POST",body:JSON.stringify({account_id:selected.account_id,reason})});status("banStatus","Аккаунт заблокирован","ok");await loadUser();await refreshAll()}catch(e){status("banStatus",e.message,"error")}};
+$("unbanBtn").onclick=async()=>{if(!selected||!confirm("Разблокировать аккаунт "+selected.account_id+"?"))return;try{await api("/v1/admin/users/"+encodeURIComponent(selected.account_id)+"/unban",{method:"POST"});status("banStatus","Аккаунт разблокирован","ok");await loadUser();await refreshAll()}catch(e){status("banStatus",e.message,"error")}};
+$("refreshBtn").onclick=refreshAll;$("txRefresh").onclick=loadTx;$("txSearch").onclick=loadTx;$("auditRefresh").onclick=loadAudit;
+document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("active",x===b));["accounts","transactions","audit"].forEach(t=>$(t+"Tab").classList.toggle("hidden",t!==b.dataset.tab))});
+async function verify(){if(!token)return showLogin();try{await api("/v1/admin/me");showAdmin()}catch{token="";sessionStorage.removeItem("neon_admin_token");showLogin()}}verify();
 </script></body></html>
 """)
+
+
+class AdminBanRequest(BaseModel):
+    account_id: str = Field(min_length=6, max_length=12, pattern=r"^[0-9]+$")
+    reason: str = Field(default="Нарушение правил", min_length=1, max_length=240)
+
+
+@app.get("/v1/admin/stats")
+def admin_stats(admin: AdminUser):
+    with pool.connection() as conn:
+        row = conn.execute("""
+            SELECT
+              (SELECT COUNT(*) FROM users) AS users_count,
+              (SELECT COUNT(*) FROM users WHERE banned_at IS NOT NULL) AS banned_count,
+              (SELECT COALESCE(SUM(balance_kopecks),0) FROM wallets) AS wallet_total,
+              (SELECT COALESCE(SUM(balance_kopecks),0) FROM casino_wallets) AS casino_total,
+              (SELECT COUNT(*) FROM transactions) AS transactions_count,
+              (SELECT COUNT(*) FROM transactions WHERE created_at >= NOW() - INTERVAL '24 hours') AS transactions_24h
+        """).fetchone()
+    return dict(row)
+
+
+@app.get("/v1/admin/transactions")
+def admin_transactions(admin: AdminUser, q: str = "", kind: str = "", limit: int = Query(50, ge=1, le=200)):
+    with pool.connection() as conn:
+        rows = conn.execute("""
+            SELECT t.id, t.kind, t.description, t.amount_kopecks, t.created_at,
+                   su.account_id AS sender_account_id, su.username AS sender_username,
+                   ru.account_id AS recipient_account_id, ru.username AS recipient_username,
+                   au.account_id AS admin_account_id
+            FROM transactions t
+            LEFT JOIN users su ON su.id=t.sender_user_id
+            LEFT JOIN users ru ON ru.id=t.recipient_user_id
+            LEFT JOIN users au ON au.id=t.admin_user_id
+            WHERE (%s = '' OR t.kind = %s)
+              AND (%s = '' OR su.account_id ILIKE %s OR ru.account_id ILIKE %s
+                   OR su.email ILIKE %s OR ru.email ILIKE %s OR t.description ILIKE %s)
+            ORDER BY t.created_at DESC LIMIT %s
+        """, (kind, kind, q, f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%", limit)).fetchall()
+    return {"items": [{
+        "id": str(r["id"]), "kind": r["kind"], "description": r["description"],
+        "amount_kopecks": r["amount_kopecks"], "created_at": r["created_at"].isoformat(),
+        "sender_account_id": r["sender_account_id"], "sender_username": r["sender_username"],
+        "recipient_account_id": r["recipient_account_id"], "recipient_username": r["recipient_username"],
+        "admin_account_id": r["admin_account_id"]
+    } for r in rows]}
+
+
+@app.get("/v1/admin/audit")
+def admin_audit(admin: AdminUser, limit: int = Query(50, ge=1, le=200)):
+    with pool.connection() as conn:
+        rows = conn.execute("""
+            SELECT a.id, a.action, a.details, a.created_at,
+                   au.account_id AS admin_account_id, tu.account_id AS target_account_id
+            FROM admin_audit_logs a
+            JOIN users au ON au.id=a.admin_user_id
+            LEFT JOIN users tu ON tu.id=a.target_user_id
+            ORDER BY a.created_at DESC LIMIT %s
+        """, (limit,)).fetchall()
+    return {"items": [{
+        "id": r["id"], "action": r["action"], "details": r["details"],
+        "created_at": r["created_at"].isoformat(),
+        "admin_account_id": r["admin_account_id"], "target_account_id": r["target_account_id"]
+    } for r in rows]}
+
+
+@app.get("/v1/admin/users/{account_id}")
+def admin_user_details(account_id: str, admin: AdminUser):
+    with pool.connection() as conn:
+        user = conn.execute("""
+            SELECT u.id, u.account_id, u.username, u.email, u.created_at, u.banned_at, u.ban_reason,
+                   COALESCE(w.balance_kopecks,0) AS balance_kopecks,
+                   COALESCE(c.balance_kopecks,0) AS casino_balance_kopecks
+            FROM users u LEFT JOIN wallets w ON w.user_id=u.id
+            LEFT JOIN casino_wallets c ON c.user_id=u.id
+            WHERE u.account_id=%s
+        """, (account_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Аккаунт не найден")
+        txs = conn.execute("""
+            SELECT id, kind, description, amount_kopecks, created_at
+            FROM transactions
+            WHERE sender_user_id=%s OR recipient_user_id=%s
+            ORDER BY created_at DESC LIMIT 20
+        """, (user["id"], user["id"])).fetchall()
+    return {
+        "account_id": user["account_id"], "username": user["username"], "email": user["email"],
+        "created_at": user["created_at"].isoformat(),
+        "balance_kopecks": user["balance_kopecks"], "casino_balance_kopecks": user["casino_balance_kopecks"],
+        "banned": user["banned_at"] is not None,
+        "banned_at": user["banned_at"].isoformat() if user["banned_at"] else None,
+        "ban_reason": user["ban_reason"],
+        "transactions": [{"id": str(t["id"]), "kind": t["kind"], "description": t["description"],
+                          "amount_kopecks": t["amount_kopecks"], "created_at": t["created_at"].isoformat()}
+                         for t in txs]
+    }
+
+
+@app.post("/v1/admin/users/ban")
+def admin_ban_user(body: AdminBanRequest, admin: AdminUser):
+    if body.account_id in ADMIN_ACCOUNT_IDS:
+        raise HTTPException(status_code=403, detail="Нельзя заблокировать администратора")
+    with pool.connection() as conn:
+        with conn.transaction():
+            target = conn.execute("SELECT id, banned_at FROM users WHERE account_id=%s FOR UPDATE",
+                                  (body.account_id,)).fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="Аккаунт не найден")
+            if target["banned_at"] is None:
+                conn.execute("""UPDATE users SET banned_at=NOW(), ban_reason=%s, banned_by=%s
+                                 WHERE id=%s""", (body.reason.strip(), admin["id"], target["id"]))
+                conn.execute("""INSERT INTO admin_audit_logs(admin_user_id,target_user_id,action,details)
+                                 VALUES (%s,%s,'user_banned',%s::jsonb)""",
+                             (admin["id"], target["id"], json.dumps({"reason": body.reason.strip()})))
+    return {"status": "banned", "account_id": body.account_id}
+
+
+@app.post("/v1/admin/users/{account_id}/unban")
+def admin_unban_user(account_id: str, admin: AdminUser):
+    with pool.connection() as conn:
+        with conn.transaction():
+            target = conn.execute("SELECT id, banned_at FROM users WHERE account_id=%s FOR UPDATE",
+                                  (account_id,)).fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="Аккаунт не найден")
+            if target["banned_at"] is not None:
+                conn.execute("UPDATE users SET banned_at=NULL, ban_reason=NULL, banned_by=NULL WHERE id=%s",
+                             (target["id"],))
+                conn.execute("""INSERT INTO admin_audit_logs(admin_user_id,target_user_id,action,details)
+                                 VALUES (%s,%s,'user_unbanned','{}'::jsonb)""",
+                             (admin["id"], target["id"]))
+    return {"status": "active", "account_id": account_id}
 
 
 @app.get("/v1/admin/me")
@@ -337,8 +510,11 @@ def admin_search_users(q: str, user: AdminUser):
         raise HTTPException(status_code=400, detail="Укажи ID или email аккаунта")
     with pool.connection() as conn:
         rows = conn.execute(
-            """SELECT u.account_id, u.username, u.email, w.balance_kopecks
-               FROM users u JOIN wallets w ON w.user_id = u.id
+            """SELECT u.account_id, u.username, u.email, u.created_at, u.banned_at, u.ban_reason,
+                      COALESCE(w.balance_kopecks,0) AS balance_kopecks,
+                      COALESCE(c.balance_kopecks,0) AS casino_balance_kopecks
+               FROM users u LEFT JOIN wallets w ON w.user_id = u.id
+               LEFT JOIN casino_wallets c ON c.user_id = u.id
                WHERE u.account_id = %s OR LOWER(u.email) = LOWER(%s)
                LIMIT 10""",
             (query, query),
@@ -346,6 +522,9 @@ def admin_search_users(q: str, user: AdminUser):
     return {"items": [{
         "account_id": row["account_id"], "username": row["username"],
         "email": row["email"], "balance_kopecks": row["balance_kopecks"],
+        "casino_balance_kopecks": row["casino_balance_kopecks"],
+        "created_at": row["created_at"].isoformat(), "banned": row["banned_at"] is not None,
+        "ban_reason": row["ban_reason"],
     } for row in rows]}
 
 
