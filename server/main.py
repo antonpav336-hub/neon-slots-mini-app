@@ -1723,11 +1723,16 @@ def spin_roulette(body: RouletteSpinRequest, user: User):
             ).fetchone()
             # A retried HTTP request returns the original spin and never charges twice.
             previous = conn.execute(
-                """SELECT id, winning_number, total_bet_kopecks, payout_kopecks, created_at
+                """SELECT id, bets, winning_number, total_bet_kopecks, payout_kopecks, created_at
                    FROM casino_roulette_rounds WHERE user_id = %s AND request_key = %s""",
                 (user["id"], body.request_key),
             ).fetchone()
             if previous:
+                previous_bets = previous["bets"]
+                if isinstance(previous_bets, str):
+                    previous_bets = json.loads(previous_bets)
+                if previous_bets != stored_bets:
+                    raise HTTPException(status_code=409, detail="Ключ рулетки уже использован с другими ставками")
                 n = previous["winning_number"]
                 color = "green" if n == 0 else ("red" if n in ROULETTE_RED_NUMBERS else "black")
                 return {
@@ -1755,8 +1760,9 @@ def spin_roulette(body: RouletteSpinRequest, user: User):
                 won, odds = roulette_bet_wins(bet, winning_number)
                 if won:
                     payout += bet.amount_kopecks * odds
-            if payout > 2_000_000_000:
-                raise HTTPException(status_code=422, detail="Слишком большая потенциальная выплата")
+            # Maximum theoretical return: 1,000,000,000 ₽ × 36 for a straight-up number.
+            if payout > 3_600_000_000_000:
+                raise HTTPException(status_code=422, detail="Потенциальная выплата превышает системный предел")
             conn.execute(
                 "UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s + %s, updated_at = NOW() WHERE user_id = %s",
                 (total_bet, payout, user["id"]),
@@ -1880,13 +1886,16 @@ def roulette_history(user: User, limit: int = 12):
     limit = max(1, min(limit, 30))
     with pool.connection() as conn:
         rows = conn.execute(
-            """SELECT winning_number, created_at FROM casino_roulette_rounds
+            """SELECT winning_number, total_bet_kopecks, payout_kopecks, created_at
+               FROM casino_roulette_rounds
                WHERE user_id = %s ORDER BY created_at DESC LIMIT %s""",
             (user["id"], limit),
         ).fetchall()
     return {"items": [{
         "winning_number": row["winning_number"],
         "color": "green" if row["winning_number"] == 0 else ("red" if row["winning_number"] in ROULETTE_RED_NUMBERS else "black"),
+        "bet_kopecks": row["total_bet_kopecks"],
+        "payout_kopecks": row["payout_kopecks"],
         "created_at": row["created_at"].isoformat()
     } for row in rows]}
 
