@@ -45,6 +45,10 @@ class HiloStart(Stake):
     pass
 
 
+class ActionKey(BaseModel):
+    request_key: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
 class HiloPick(BaseModel):
     choice: str = Field(pattern=r"^(higher|lower|cashout)$")
     request_key: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
@@ -141,8 +145,10 @@ def _credit(conn, user_id, amount):
     conn.execute("UPDATE casino_wallets SET balance_kopecks=balance_kopecks+%s,updated_at=NOW() WHERE user_id=%s", (amount,user_id))
 
 
-def _replay(conn, user_id, key):
-    row=conn.execute("SELECT response FROM casino_extended_actions WHERE user_id=%s AND request_key=%s",(user_id,key)).fetchone()
+def _replay(conn, user_id, key, action):
+    row=conn.execute("SELECT action,response FROM casino_extended_actions WHERE user_id=%s AND request_key=%s",(user_id,key)).fetchone()
+    if row and row["action"] != action:
+        raise HTTPException(409, "Ключ запроса уже использован для другого действия")
     return row["response"] if row else None
 
 
@@ -159,10 +165,9 @@ def _card_value(card):
 
 
 def _hilo_multiplier(card, choice):
-    # Probability of the next rank being strictly higher/lower; conservative 99% RTP.
-    value=_card_value(card)
-    favorable=(10-value if choice=="higher" else value-1)
-    probability=max(1, favorable*4/52)
+    # 13 equally likely ranks; equal cards are a loss. Apply a 1% house edge.
+    favorable=(13-card if choice=="higher" else card-1)
+    probability=max(1/13, favorable/13)
     return math.floor((0.99/probability)*10000)/10000
 
 
@@ -182,7 +187,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
     @app.post("/v1/casino/dice/roll")
     def extended_dice(body: DiceStake, user: User):
         with pool.connection() as conn, conn.transaction():
-            replay=_replay(conn,user["id"],body.request_key)
+            replay=_replay(conn,user["id"],body.request_key,"dice")
             if replay is not None: return replay
             _debit(conn,user["id"],body.bet_kopecks)
             roll=secrets.randbelow(100)+1
@@ -199,7 +204,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
     @app.post("/v1/casino/hilo/start",status_code=201)
     def hilo_start(body: HiloStart,user: User):
         with pool.connection() as conn, conn.transaction():
-            replay=_replay(conn,user["id"],body.request_key)
+            replay=_replay(conn,user["id"],body.request_key,"hilo_start")
             if replay is not None:return replay
             active=conn.execute("SELECT id FROM casino_extended_rounds WHERE user_id=%s AND game='hilo' AND status='active' FOR UPDATE",(user["id"],)).fetchone()
             if active:raise HTTPException(409,"У тебя уже есть активный раунд Hi-Lo")
@@ -217,7 +222,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
     @app.post("/v1/casino/hilo/{round_id}/pick")
     def hilo_pick(round_id: str,body: HiloPick,user: User):
         with pool.connection() as conn,conn.transaction():
-            replay=_replay(conn,user["id"],body.request_key)
+            replay=_replay(conn,user["id"],body.request_key,"hilo_pick")
             if replay is not None:return replay
             row=conn.execute("SELECT * FROM casino_extended_rounds WHERE id=%s AND user_id=%s AND game='hilo' FOR UPDATE",(round_id,user["id"])).fetchone()
             if not row or row["status"]!="active":raise HTTPException(409,"Раунд Hi-Lo не активен")
@@ -240,7 +245,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
     @app.post("/v1/casino/tower/start",status_code=201)
     def tower_start(body: TowerStart,user: User):
         with pool.connection() as conn,conn.transaction():
-            replay=_replay(conn,user["id"],body.request_key)
+            replay=_replay(conn,user["id"],body.request_key,"tower_start")
             if replay is not None:return replay
             active=conn.execute("SELECT id FROM casino_extended_rounds WHERE user_id=%s AND game='tower' AND status='active' FOR UPDATE",(user["id"],)).fetchone()
             if active:raise HTTPException(409,"У тебя уже есть активная башня")
@@ -259,7 +264,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
     @app.post("/v1/casino/tower/{round_id}/pick")
     def tower_pick(round_id: str,body: TowerPick,user: User):
         with pool.connection() as conn,conn.transaction():
-            replay=_replay(conn,user["id"],body.request_key)
+            replay=_replay(conn,user["id"],body.request_key,"tower_pick")
             if replay is not None:return replay
             row=conn.execute("SELECT * FROM casino_extended_rounds WHERE id=%s AND user_id=%s AND game='tower' FOR UPDATE",(round_id,user["id"])).fetchone()
             if not row or row["status"]!="active":raise HTTPException(409,"Башня не активна")
@@ -277,9 +282,9 @@ def register_extended_routes(app: FastAPI, pool, current_user):
             result=_round_payload(row);_remember(conn,user["id"],body.request_key,"tower_pick",result);return result
 
     @app.post("/v1/casino/tower/{round_id}/cashout")
-    def tower_cashout(round_id: str,body: HiloPick,user: User):
+    def tower_cashout(round_id: str,body: ActionKey,user: User):
         with pool.connection() as conn,conn.transaction():
-            replay=_replay(conn,user["id"],body.request_key)
+            replay=_replay(conn,user["id"],body.request_key,"tower_cashout")
             if replay is not None:return replay
             row=conn.execute("SELECT * FROM casino_extended_rounds WHERE id=%s AND user_id=%s AND game='tower' FOR UPDATE",(round_id,user["id"])).fetchone()
             if not row or row["status"]!="active":raise HTTPException(409,"Башня не активна")
@@ -296,7 +301,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
     @app.post("/v1/casino/cases/open")
     def cases_open(body: CaseOpen,user: User):
         with pool.connection() as conn,conn.transaction():
-            replay=_replay(conn,user["id"],body.request_key)
+            replay=_replay(conn,user["id"],body.request_key,"case_open")
             if replay is not None:return replay
             config=CASES[body.case_id];total=config["price"]*body.quantity
             _debit(conn,user["id"],total);prizes=[]
@@ -314,11 +319,11 @@ def register_extended_routes(app: FastAPI, pool, current_user):
     @app.post("/v1/casino/slots/spin")
     def slots_spin(body: SlotSpin,user: User):
         with pool.connection() as conn,conn.transaction():
-            replay=_replay(conn,user["id"],body.request_key)
+            replay=_replay(conn,user["id"],body.request_key,"slot_spin")
             if replay is not None:return replay
             _debit(conn,user["id"],body.bet_kopecks)
             weights=[x["weight"] for x in SYMBOLS];ids=[x["id"] for x in SYMBOLS]
-            def symbol(): return ids[secrets.randbelow(sum(weights))] if False else _weighted_symbol()
+            def symbol(): return _weighted_symbol()
             def _weighted_symbol():
                 n=secrets.randbelow(sum(weights))
                 for item in SYMBOLS:
