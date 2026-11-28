@@ -1929,10 +1929,10 @@ def casino_progress_totals(conn, user_id: int) -> dict:
              COALESCE(SUM(payout_kopecks), 0)::BIGINT AS paid,
              COUNT(*)::BIGINT AS rounds
            FROM (
-             SELECT bet_kopecks, payout_kopecks FROM casino_crash_rounds WHERE user_id = %s
-             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_mines_rounds WHERE user_id = %s
-             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_ladder_rounds WHERE user_id = %s
-             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_blackjack_rounds WHERE user_id = %s
+             SELECT bet_kopecks, payout_kopecks FROM casino_crash_rounds WHERE user_id = %s AND status <> 'active'
+             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_mines_rounds WHERE user_id = %s AND status <> 'active'
+             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_ladder_rounds WHERE user_id = %s AND status <> 'active'
+             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_blackjack_rounds WHERE user_id = %s AND status <> 'active'
              UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_plinko_rounds WHERE user_id = %s
              UNION ALL SELECT total_bet_kopecks AS bet_kopecks, payout_kopecks FROM casino_roulette_rounds WHERE user_id = %s
            ) rounds""",
@@ -2048,10 +2048,10 @@ def casino_leaderboard(user: User, period: str = Query("all", pattern=r"^(all|we
     with pool.connection() as conn:
         rows = conn.execute(
             f"""WITH rounds AS (
-                SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_crash_rounds WHERE {time_filter}
-                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_mines_rounds WHERE {time_filter}
-                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_ladder_rounds WHERE {time_filter}
-                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_blackjack_rounds WHERE {time_filter}
+                SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_crash_rounds WHERE status <> 'active' AND {time_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_mines_rounds WHERE status <> 'active' AND {time_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_ladder_rounds WHERE status <> 'active' AND {time_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_blackjack_rounds WHERE status <> 'active' AND {time_filter}
                 UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_plinko_rounds WHERE {time_filter}
                 UNION ALL SELECT user_id, total_bet_kopecks AS bet_kopecks, payout_kopecks, created_at FROM casino_roulette_rounds WHERE {time_filter}
             )
