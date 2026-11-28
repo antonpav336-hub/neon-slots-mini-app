@@ -329,6 +329,12 @@ def create_casino_deposit_request(body: CasinoDepositCreateRequest, user: User):
                 "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
                 (user["id"],),
             )
+            # Lock the per-user casino wallet row so simultaneous requests cannot
+            # both observe an empty pending-request set and create duplicates.
+            conn.execute(
+                "SELECT user_id FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            )
             existing = conn.execute(
                 """SELECT id FROM casino_deposit_requests
                    WHERE user_id = %s AND status = 'pending' AND expires_at > NOW()
@@ -467,6 +473,7 @@ def start_crash_round(body: CrashStartRequest, user: User):
         "status": "active",
         "bet_kopecks": row["bet_kopecks"],
         "current_multiplier": 1.00,
+        "started_at": row["started_at"].isoformat(),
         "message": "Раунд начался",
     }
 
