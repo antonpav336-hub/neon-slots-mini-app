@@ -687,12 +687,12 @@ def wallet(user: User):
     }
 
 class CasinoWithdrawRequest(BaseModel):
-    amount_kopecks: int = Field(gt=0, le=100_000_000)
+    amount_kopecks: int = Field(gt=0, le=100_000_000_000)
     request_key: str = Field(min_length=16, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
 
 
 class CasinoDepositCreateRequest(BaseModel):
-    amount_kopecks: int = Field(gt=0, le=100_000_000)
+    amount_kopecks: int = Field(gt=0, le=100_000_000_000)
 
 
 @app.get("/v1/casino/wallet")
