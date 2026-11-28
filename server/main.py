@@ -471,6 +471,32 @@ def start_crash_round(body: CrashStartRequest, user: User):
     }
 
 
+
+@app.get("/v1/casino/crash-active")
+def get_active_crash_round(user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """SELECT id, user_id, bet_kopecks, crash_multiplier, status, started_at,
+                          finished_at, cashout_multiplier, payout_kopecks
+                   FROM casino_crash_rounds WHERE user_id = %s AND status = 'active'
+                   ORDER BY started_at DESC LIMIT 1 FOR UPDATE""",
+                (user["id"],),
+            ).fetchone()
+            if not row:
+                return {"round": None}
+            current = crash_multiplier_for_elapsed(row["started_at"])
+            if current >= float(row["crash_multiplier"]):
+                row = conn.execute(
+                    """UPDATE casino_crash_rounds SET status = 'crashed', finished_at = NOW()
+                       WHERE id = %s RETURNING id, user_id, bet_kopecks, crash_multiplier, status,
+                         started_at, finished_at, cashout_multiplier, payout_kopecks""",
+                    (row["id"],),
+                ).fetchone()
+                return {"round": crash_round_payload(row)}
+            return {"round": crash_round_payload(row, current)}
+
+
 @app.get("/v1/casino/crash/{round_id}")
 def get_crash_round(round_id: str, user: User):
     with pool.connection() as conn:
@@ -539,7 +565,7 @@ def cashout_crash_round(round_id: str, user: User):
     return result
 
 
-@app.get("/v1/casino/crash/history")
+@app.get("/v1/casino/crash-history")
 def crash_history(user: User, limit: int = 8):
     limit = max(1, min(limit, 30))
     with pool.connection() as conn:
