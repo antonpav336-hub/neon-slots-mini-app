@@ -166,6 +166,21 @@ def initialize_database() -> None:
             ON casino_blackjack_rounds(user_id, started_at DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS casino_blackjack_one_active_per_user_idx
             ON casino_blackjack_rounds(user_id) WHERE status = 'active';
+        CREATE TABLE IF NOT EXISTS casino_plinko_rounds (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            request_key VARCHAR(64) NOT NULL,
+            bet_kopecks BIGINT NOT NULL CHECK (bet_kopecks > 0),
+            path SMALLINT[] NOT NULL CHECK (array_length(path, 1) = 12),
+            bucket SMALLINT NOT NULL CHECK (bucket BETWEEN 0 AND 12),
+            multiplier NUMERIC(6,2) NOT NULL CHECK (multiplier > 0),
+            payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS casino_plinko_request_key_idx
+            ON casino_plinko_rounds(user_id, request_key);
+        CREATE INDEX IF NOT EXISTS casino_plinko_user_history_idx
+            ON casino_plinko_rounds(user_id, created_at DESC);
         CREATE TABLE IF NOT EXISTS casino_roulette_rounds (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -683,6 +698,14 @@ def crash_history(user: User, limit: int = 8):
     } for row in rows]}
 
 
+
+
+class PlinkoDropRequest(BaseModel):
+    bet_kopecks: int = Field(gt=0, le=100_000_000)
+    request_key: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+PLINKO_MULTIPLIERS = [8.00, 4.00, 2.00, 1.40, 1.10, 0.80, 0.50, 0.80, 1.10, 1.40, 2.00, 4.00, 8.00]
 
 
 class MinesStartRequest(BaseModel):
@@ -1444,6 +1467,84 @@ def spin_roulette(body: RouletteSpinRequest, user: User):
         "round_id": str(row["id"]), "winning_number": winning_number, "color": color,
         "total_bet_kopecks": total_bet, "payout_kopecks": payout,
         "net_kopecks": payout - total_bet, "created_at": row["created_at"].isoformat()
+    }
+
+
+
+@app.post("/v1/casino/plinko/drop", status_code=201)
+def drop_plinko_ball(body: PlinkoDropRequest, user: User):
+    # The complete result and wallet movement are decided atomically on the server.
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+
+            # Idempotency protects against a repeated request after a dropped connection.
+            previous = conn.execute(
+                """SELECT id, path, bucket, multiplier, bet_kopecks, payout_kopecks, created_at
+                   FROM casino_plinko_rounds WHERE user_id = %s AND request_key = %s""",
+                (user["id"], body.request_key),
+            ).fetchone()
+            if previous:
+                return {
+                    "round_id": str(previous["id"]),
+                    "path": [int(move) for move in previous["path"]],
+                    "bucket": previous["bucket"],
+                    "multiplier": float(previous["multiplier"]),
+                    "bet_kopecks": previous["bet_kopecks"],
+                    "payout_kopecks": previous["payout_kopecks"],
+                    "created_at": previous["created_at"].isoformat(),
+                }
+
+            for table, game in [
+                ("casino_crash_rounds", "CRASH"),
+                ("casino_mines_rounds", "MINES"),
+                ("casino_ladder_rounds", "ЛЕСЕНКА"),
+                ("casino_blackjack_rounds", "BLACKJACK"),
+            ]:
+                active = conn.execute(
+                    f"SELECT id FROM {table} WHERE user_id = %s AND status = 'active'",
+                    (user["id"],),
+                ).fetchone()
+                if active:
+                    raise HTTPException(status_code=409, detail=f"Сначала заверши активную игру: {game}")
+
+            if wallet["balance_kopecks"] < body.bet_kopecks:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+
+            path = [secrets.randbelow(2) for _ in range(12)]
+            bucket = sum(path)
+            multiplier = PLINKO_MULTIPLIERS[bucket]
+            payout = int(body.bet_kopecks * multiplier)
+
+            conn.execute(
+                """UPDATE casino_wallets
+                   SET balance_kopecks = balance_kopecks - %s + %s, updated_at = NOW()
+                   WHERE user_id = %s""",
+                (body.bet_kopecks, payout, user["id"]),
+            )
+            row = conn.execute(
+                """INSERT INTO casino_plinko_rounds
+                   (user_id, request_key, bet_kopecks, path, bucket, multiplier, payout_kopecks)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   RETURNING id, path, bucket, multiplier, bet_kopecks, payout_kopecks, created_at""",
+                (user["id"], body.request_key, body.bet_kopecks, path, bucket, multiplier, payout),
+            ).fetchone()
+
+    return {
+        "round_id": str(row["id"]),
+        "path": [int(move) for move in row["path"]],
+        "bucket": row["bucket"],
+        "multiplier": float(row["multiplier"]),
+        "bet_kopecks": row["bet_kopecks"],
+        "payout_kopecks": row["payout_kopecks"],
+        "created_at": row["created_at"].isoformat(),
     }
 
 
