@@ -88,8 +88,9 @@ def initialize_extended_games(pool):
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
-        CREATE UNIQUE INDEX IF NOT EXISTS casino_extended_one_active
-          ON casino_extended_rounds(user_id, game) WHERE status='active';
+        DROP INDEX IF EXISTS casino_extended_one_active;
+        CREATE UNIQUE INDEX IF NOT EXISTS casino_extended_one_active_user
+          ON casino_extended_rounds(user_id) WHERE status='active';
         CREATE INDEX IF NOT EXISTS casino_extended_user_history
           ON casino_extended_rounds(user_id, created_at DESC);
         CREATE TABLE IF NOT EXISTS casino_extended_actions (
@@ -217,8 +218,8 @@ def register_extended_routes(app: FastAPI, pool, current_user):
             replay=_replay(conn,user["id"],body.request_key,"hilo_start")
             if replay is not None:return replay
             if _legacy_active(conn,user["id"]): raise HTTPException(409,"Сначала заверши активную игру")
-            active=conn.execute("SELECT id FROM casino_extended_rounds WHERE user_id=%s AND game='hilo' AND status='active' FOR UPDATE",(user["id"],)).fetchone()
-            if active:raise HTTPException(409,"У тебя уже есть активный раунд Hi-Lo")
+            active=conn.execute("SELECT id FROM casino_extended_rounds WHERE user_id=%s AND status='active' FOR UPDATE",(user["id"],)).fetchone()
+            if active:raise HTTPException(409,"Сначала заверши активную игру")
             _debit(conn,user["id"],body.bet_kopecks)
             state={"step":0,"current_card":_card(),"history":[],"multiplier":1.0}
             row=conn.execute("INSERT INTO casino_extended_rounds(id,user_id,game,bet_kopecks,state,status) VALUES (%s,%s,'hilo',%s,%s,'active') RETURNING *",(uuid.uuid4(),user["id"],body.bet_kopecks,Jsonb(state))).fetchone()
@@ -259,8 +260,8 @@ def register_extended_routes(app: FastAPI, pool, current_user):
             replay=_replay(conn,user["id"],body.request_key,"tower_start")
             if replay is not None:return replay
             if _legacy_active(conn,user["id"]): raise HTTPException(409,"Сначала заверши активную игру")
-            active=conn.execute("SELECT id FROM casino_extended_rounds WHERE user_id=%s AND game='tower' AND status='active' FOR UPDATE",(user["id"],)).fetchone()
-            if active:raise HTTPException(409,"У тебя уже есть активная башня")
+            active=conn.execute("SELECT id FROM casino_extended_rounds WHERE user_id=%s AND status='active' FOR UPDATE",(user["id"],)).fetchone()
+            if active:raise HTTPException(409,"Сначала заверши активную игру")
             _debit(conn,user["id"],body.bet_kopecks)
             traps=[[secrets.randbelow(body.columns)] for _ in range(body.rows)]
             state={"step":0,"rows":body.rows,"columns":body.columns,"traps":traps,"opened":[],"multiplier":1.0}
@@ -286,7 +287,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
                 status_value="lost";payout=0
             else:
                 state["opened"].append(body.column);state["step"]+=1
-                state["multiplier"]=math.floor((1.90**state["step"])*100)/100
+                state["multiplier"]=math.floor((((0.99*state["columns"]/(state["columns"]-1))**state["step"])*100))/100
                 status_value="won" if state["step"]==state["rows"] else "active"
                 payout=int(row["bet_kopecks"]*state["multiplier"]) if status_value=="won" else 0
                 if payout:_credit(conn,user["id"],payout)
