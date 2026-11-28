@@ -1963,7 +1963,7 @@ def vip_payload(wagered_kopecks: int) -> dict:
     }
 
 
-def daily_bonus_payload(conn, user_id: int) -> dict:
+def daily_bonus_payload(conn, user_id: int, vip_level_index: int = 0) -> dict:
     row = conn.execute(
         """SELECT claim_date, streak, reward_kopecks
            FROM casino_daily_claims WHERE user_id = %s
@@ -1981,7 +1981,10 @@ def daily_bonus_payload(conn, user_id: int) -> dict:
         streak = int(row["streak"]) if claimed_today or last_date == today - timedelta(days=1) else 0
         next_streak = min(7, streak + 1)
         next_reward = DAILY_REWARD_BASE_KOPECKS * next_streak
+    vip_bonus_bps = [10_000, 11_000, 12_500, 15_000][max(0, min(3, vip_level_index))]
+    next_reward = (next_reward * vip_bonus_bps) // 10_000
     return {
+        "vip_bonus_percent": (vip_bonus_bps - 10_000) // 100,
         "claimed_today": claimed_today,
         "streak": streak,
         "next_reward_kopecks": next_reward,
@@ -1994,8 +1997,9 @@ def daily_bonus_payload(conn, user_id: int) -> dict:
 def casino_player_center(user: User):
     with pool.connection() as conn:
         totals = casino_progress_totals(conn, user["id"])
-        daily = daily_bonus_payload(conn, user["id"])
-    return {"vip": vip_payload(totals["wagered_kopecks"]), "daily": daily, "totals": totals}
+        vip = vip_payload(totals["wagered_kopecks"])
+        daily = daily_bonus_payload(conn, user["id"], vip["level_index"])
+    return {"vip": vip, "daily": daily, "totals": totals}
 
 
 @app.post("/v1/casino/daily-bonus/claim", status_code=201)
@@ -2019,7 +2023,10 @@ def claim_casino_daily_bonus(user: User):
             if last and last["claim_date"] == today:
                 raise HTTPException(status_code=409, detail="Ежедневный бонус уже получен сегодня")
             streak = min(7, int(last["streak"]) + 1) if last and last["claim_date"] == today - timedelta(days=1) else 1
-            reward = DAILY_REWARD_BASE_KOPECKS * streak
+            totals = casino_progress_totals(conn, user["id"])
+            vip = vip_payload(totals["wagered_kopecks"])
+            vip_bonus_bps = [10_000, 11_000, 12_500, 15_000][vip["level_index"]]
+            reward = (DAILY_REWARD_BASE_KOPECKS * streak * vip_bonus_bps) // 10_000
             conn.execute(
                 """INSERT INTO casino_daily_claims(user_id, claim_date, streak, reward_kopecks)
                    VALUES (%s, %s, %s, %s)""",
@@ -2036,6 +2043,8 @@ def claim_casino_daily_bonus(user: User):
         "reward_kopecks": reward,
         "reward_rubles": reward / 100,
         "streak": streak,
+        "vip_level": vip["level"],
+        "vip_bonus_percent": (vip_bonus_bps - 10_000) // 100,
         "balance_kopecks": new_balance,
         "virtual_only": True,
     }
