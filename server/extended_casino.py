@@ -126,6 +126,16 @@ def initialize_extended_games(pool):
         conn.commit()
 
 
+def _legacy_active(conn, user_id):
+    return conn.execute("""
+        SELECT id FROM casino_crash_rounds WHERE user_id=%s AND status='active'
+        UNION ALL SELECT id FROM casino_mines_rounds WHERE user_id=%s AND status='active'
+        UNION ALL SELECT id FROM casino_ladder_rounds WHERE user_id=%s AND status='active'
+        UNION ALL SELECT id FROM casino_blackjack_rounds WHERE user_id=%s AND status='active'
+        LIMIT 1
+    """, (user_id,user_id,user_id,user_id)).fetchone()
+
+
 def _wallet(conn, user_id):
     conn.execute("INSERT INTO casino_wallets(user_id,balance_kopecks) VALUES (%s,0) ON CONFLICT DO NOTHING", (user_id,))
     row = conn.execute("SELECT balance_kopecks FROM casino_wallets WHERE user_id=%s FOR UPDATE", (user_id,)).fetchone()
@@ -206,6 +216,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
         with pool.connection() as conn, conn.transaction():
             replay=_replay(conn,user["id"],body.request_key,"hilo_start")
             if replay is not None:return replay
+            if _legacy_active(conn,user["id"]): raise HTTPException(409,"Сначала заверши активную игру")
             active=conn.execute("SELECT id FROM casino_extended_rounds WHERE user_id=%s AND game='hilo' AND status='active' FOR UPDATE",(user["id"],)).fetchone()
             if active:raise HTTPException(409,"У тебя уже есть активный раунд Hi-Lo")
             _debit(conn,user["id"],body.bet_kopecks)
@@ -237,7 +248,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
                 state["history"].append({"from":old,"choice":body.choice,"to":new,"won":won})
                 state["step"]+=1
                 if won:
-                    state["current_card"]=new;state["multiplier"]=round(state["multiplier"]*mult,4);status_value="active";payout=0
+                    state["current_card"]=new;state["multiplier"]=min(round(state["multiplier"]*mult,4), MAX_PAYOUT / row["bet_kopecks"]);status_value="active";payout=0
                 else:status_value="lost";payout=0
             row=conn.execute("UPDATE casino_extended_rounds SET state=%s,status=%s,payout_kopecks=%s,updated_at=NOW() WHERE id=%s RETURNING *",(Jsonb(state),status_value,payout,row["id"])).fetchone()
             result=_round_payload(row);_remember(conn,user["id"],body.request_key,"hilo_pick",result);return result
@@ -247,6 +258,7 @@ def register_extended_routes(app: FastAPI, pool, current_user):
         with pool.connection() as conn,conn.transaction():
             replay=_replay(conn,user["id"],body.request_key,"tower_start")
             if replay is not None:return replay
+            if _legacy_active(conn,user["id"]): raise HTTPException(409,"Сначала заверши активную игру")
             active=conn.execute("SELECT id FROM casino_extended_rounds WHERE user_id=%s AND game='tower' AND status='active' FOR UPDATE",(user["id"],)).fetchone()
             if active:raise HTTPException(409,"У тебя уже есть активная башня")
             _debit(conn,user["id"],body.bet_kopecks)
