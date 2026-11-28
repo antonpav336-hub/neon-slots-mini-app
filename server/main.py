@@ -210,6 +210,22 @@ def initialize_database() -> None:
             ON casino_plinko_rounds(user_id, request_key);
         CREATE INDEX IF NOT EXISTS casino_plinko_user_history_idx
             ON casino_plinko_rounds(user_id, created_at DESC);
+        CREATE TABLE IF NOT EXISTS casino_instant_rounds (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            request_key VARCHAR(64) NOT NULL,
+            game VARCHAR(16) NOT NULL CHECK (game IN ('dice','hilo','baccarat','tower')),
+            choice VARCHAR(16) NOT NULL,
+            bet_kopecks BIGINT NOT NULL CHECK (bet_kopecks > 0 AND bet_kopecks <= 100000000000),
+            result JSONB NOT NULL,
+            won BOOLEAN NOT NULL,
+            multiplier NUMERIC(12,4) NOT NULL CHECK (multiplier >= 0),
+            payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(user_id, request_key)
+        );
+        CREATE INDEX IF NOT EXISTS casino_instant_user_history_idx
+            ON casino_instant_rounds(user_id, created_at DESC);
         CREATE TABLE IF NOT EXISTS casino_roulette_rounds (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1016,6 +1032,13 @@ def crash_history(user: User, limit: int = 8):
 
 
 
+class InstantGameRequest(BaseModel):
+    game: str = Field(pattern=r"^(dice|hilo|baccarat|tower)$")
+    bet_kopecks: int = Field(gt=0, le=100_000_000_000)
+    choice: str = Field(min_length=1, max_length=16)
+    request_key: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
 class PlinkoDropRequest(BaseModel):
     bet_kopecks: int = Field(gt=0, le=100_000_000_000)
     request_key: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
@@ -1793,6 +1816,138 @@ def spin_roulette(body: RouletteSpinRequest, user: User):
 
 
 
+
+def baccarat_card_value(rank: int) -> int:
+    return 0 if rank >= 10 else rank
+
+
+def draw_baccarat_hand() -> list[int]:
+    return [secrets.randbelow(13) + 1 for _ in range(2)]
+
+
+def baccarat_total(cards: list[int]) -> int:
+    return sum(baccarat_card_value(card) for card in cards) % 10
+
+
+def resolve_baccarat() -> dict:
+    player = draw_baccarat_hand()
+    banker = draw_baccarat_hand()
+    player_total, banker_total = baccarat_total(player), baccarat_total(banker)
+    if player_total not in (8, 9) and banker_total not in (8, 9):
+        player_third = None
+        if player_total <= 5:
+            player_third = secrets.randbelow(13) + 1
+            player.append(player_third)
+            player_total = baccarat_total(player)
+        if player_third is None:
+            if banker_total <= 5:
+                banker.append(secrets.randbelow(13) + 1)
+        elif banker_total <= 2:
+            banker.append(secrets.randbelow(13) + 1)
+        elif banker_total == 3 and baccarat_card_value(player_third) != 8:
+            banker.append(secrets.randbelow(13) + 1)
+        elif banker_total == 4 and 2 <= baccarat_card_value(player_third) <= 7:
+            banker.append(secrets.randbelow(13) + 1)
+        elif banker_total == 5 and 4 <= baccarat_card_value(player_third) <= 7:
+            banker.append(secrets.randbelow(13) + 1)
+        elif banker_total == 6 and 6 <= baccarat_card_value(player_third) <= 7:
+            banker.append(secrets.randbelow(13) + 1)
+        banker_total = baccarat_total(banker)
+    winner = "tie" if player_total == banker_total else ("player" if player_total > banker_total else "banker")
+    return {"player_cards": player, "banker_cards": banker,
+            "player_total": player_total, "banker_total": banker_total, "winner": winner}
+
+
+@app.post("/v1/casino/instant/play", status_code=201)
+def play_instant_game(body: InstantGameRequest, user: User):
+    allowed = {
+        "dice": {"over", "under"},
+        "hilo": {"higher", "lower"},
+        "baccarat": {"player", "banker", "tie"},
+        "tower": {"1", "2", "3", "4", "5"},
+    }
+    if body.choice not in allowed[body.game]:
+        raise HTTPException(status_code=422, detail="Некорректный выбор для этой игры")
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            previous = conn.execute(
+                """SELECT game, choice, bet_kopecks, result, won, multiplier, payout_kopecks, created_at
+                   FROM casino_instant_rounds WHERE user_id = %s AND request_key = %s""",
+                (user["id"], body.request_key),
+            ).fetchone()
+            if previous:
+                if previous["game"] != body.game or previous["choice"] != body.choice or previous["bet_kopecks"] != body.bet_kopecks:
+                    raise HTTPException(status_code=409, detail="Ключ раунда уже использован с другими параметрами")
+                return {
+                    "game": previous["game"], "choice": previous["choice"],
+                    "bet_kopecks": previous["bet_kopecks"], "result": previous["result"],
+                    "won": previous["won"], "multiplier": float(previous["multiplier"]),
+                    "payout_kopecks": previous["payout_kopecks"],
+                    "balance_kopecks": int(wallet["balance_kopecks"]),
+                    "created_at": previous["created_at"].isoformat(), "replayed": True,
+                }
+            if int(wallet["balance_kopecks"]) < body.bet_kopecks:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+
+            result: dict
+            multiplier = 0.0
+            won = False
+            if body.game == "dice":
+                roll = secrets.randbelow(100) + 1
+                won = roll > 50 if body.choice == "over" else roll <= 50
+                multiplier = 1.94
+                result = {"roll": roll, "range": "1–100", "winning_side": "over" if roll > 50 else "under"}
+            elif body.game == "hilo":
+                ranks = [secrets.randbelow(13) + 2, secrets.randbelow(13) + 2]
+                won = ranks[1] > ranks[0] if body.choice == "higher" else ranks[1] < ranks[0]
+                multiplier = 1.94
+                labels = {11:"J", 12:"Q", 13:"K", 14:"A"}
+                result = {"first_card": labels.get(ranks[0], str(ranks[0])),
+                          "second_card": labels.get(ranks[1], str(ranks[1])),
+                          "first_value": ranks[0], "second_value": ranks[1], "tie": ranks[0] == ranks[1]}
+            elif body.game == "baccarat":
+                baccarat = resolve_baccarat()
+                won = baccarat["winner"] == body.choice
+                multiplier = {"player": 2.0, "banker": 1.95, "tie": 8.0}[body.choice]
+                result = baccarat
+            else:
+                floors = int(body.choice)
+                chance = 0.48 ** floors
+                safe = secrets.randbelow(10_000) < int(chance * 10_000)
+                won = safe
+                multiplier = 0.96 / chance
+                result = {"floors": floors, "safe_floors": floors if safe else secrets.randbelow(floors),
+                          "fallen_on": None if safe else "trap", "success_chance_percent": round(chance * 100, 2)}
+
+            payout = int(body.bet_kopecks * multiplier) if won else 0
+            new_balance = int(wallet["balance_kopecks"]) - body.bet_kopecks + payout
+            conn.execute(
+                "UPDATE casino_wallets SET balance_kopecks = %s, updated_at = NOW() WHERE user_id = %s",
+                (new_balance, user["id"]),
+            )
+            conn.execute(
+                """INSERT INTO casino_instant_rounds
+                   (user_id, request_key, game, choice, bet_kopecks, result, won, multiplier, payout_kopecks)
+                   VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)""",
+                (user["id"], body.request_key, body.game, body.choice, body.bet_kopecks,
+                 json.dumps(result), won, multiplier if won else 0, payout),
+            )
+    return {
+        "game": body.game, "choice": body.choice, "bet_kopecks": body.bet_kopecks,
+        "result": result, "won": won, "multiplier": round(multiplier, 4) if won else 0,
+        "payout_kopecks": payout, "net_kopecks": payout - body.bet_kopecks,
+        "balance_kopecks": new_balance, "replayed": False,
+    }
+
+
 @app.post("/v1/casino/plinko/drop", status_code=201)
 def drop_plinko_ball(body: PlinkoDropRequest, user: User):
     # The complete result and wallet movement are decided atomically on the server.
@@ -1935,8 +2090,9 @@ def casino_progress_totals(conn, user_id: int) -> dict:
              UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_blackjack_rounds WHERE user_id = %s AND status <> 'active'
              UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_plinko_rounds WHERE user_id = %s
              UNION ALL SELECT total_bet_kopecks AS bet_kopecks, payout_kopecks FROM casino_roulette_rounds WHERE user_id = %s
+             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_instant_rounds WHERE user_id = %s
            ) rounds""",
-        (user_id, user_id, user_id, user_id, user_id, user_id),
+        (user_id, user_id, user_id, user_id, user_id, user_id, user_id),
     ).fetchone()
     return {"wagered_kopecks": int(row["wagered"]), "payout_kopecks": int(row["paid"]), "rounds": int(row["rounds"])}
 
@@ -2063,6 +2219,7 @@ def casino_leaderboard(user: User, period: str = Query("all", pattern=r"^(all|we
                 UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_blackjack_rounds WHERE status <> 'active' AND {time_filter}
                 UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_plinko_rounds WHERE {time_filter}
                 UNION ALL SELECT user_id, total_bet_kopecks AS bet_kopecks, payout_kopecks, created_at FROM casino_roulette_rounds WHERE {time_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_instant_rounds WHERE {time_filter}
             )
             SELECT u.account_id, u.username,
                    SUM(r.bet_kopecks)::BIGINT AS wagered_kopecks,
