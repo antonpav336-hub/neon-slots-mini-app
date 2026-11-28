@@ -19,6 +19,10 @@ from server.main import (
     roulette_bet_wins,
     RouletteBetRequest,
     vip_payload,
+    InstantGameRequest,
+    baccarat_card_value,
+    baccarat_total,
+    resolve_baccarat,
 )
 
 
@@ -73,6 +77,38 @@ class CasinoGameLogicTests(unittest.TestCase):
         black = RouletteBetRequest(selection="color", value="black", amount_kopecks=100)
         self.assertFalse(roulette_bet_wins(red, 0)[0])
         self.assertFalse(roulette_bet_wins(black, 0)[0])
+
+    def test_new_instant_games_accept_one_billion_virtual_rubles(self):
+        limit = 100_000_000_000
+        for game, choice in [("dice", "over"), ("hilo", "higher"),
+                             ("baccarat", "banker"), ("tower", "5")]:
+            request = InstantGameRequest(
+                game=game, choice=choice, bet_kopecks=limit,
+                request_key="instant_test_key_0001",
+            )
+            self.assertEqual(request.bet_kopecks, limit)
+
+    def test_new_instant_games_reject_invalid_choice(self):
+        with self.assertRaises(ValidationError):
+            InstantGameRequest(game="dice", choice="jackpot", bet_kopecks=100,
+                               request_key="instant_test_key_0002")
+
+    def test_baccarat_card_values_and_modulo_ten(self):
+        self.assertEqual(baccarat_card_value(1), 1)
+        self.assertEqual(baccarat_card_value(10), 0)
+        self.assertEqual(baccarat_card_value(13), 0)
+        self.assertEqual(baccarat_total([9, 8]), 7)
+
+    def test_baccarat_resolution_has_valid_totals_and_winner(self):
+        for _ in range(100):
+            result = resolve_baccarat()
+            self.assertIn(result["winner"], ("player", "banker", "tie"))
+            self.assertGreaterEqual(result["player_total"], 0)
+            self.assertLessEqual(result["player_total"], 9)
+            self.assertGreaterEqual(result["banker_total"], 0)
+            self.assertLessEqual(result["banker_total"], 9)
+            self.assertTrue(2 <= len(result["player_cards"]) <= 3)
+            self.assertTrue(2 <= len(result["banker_cards"]) <= 3)
 
     def test_vip_tier_boundaries(self):
         self.assertEqual(vip_payload(0)["level"], "Bronze")
