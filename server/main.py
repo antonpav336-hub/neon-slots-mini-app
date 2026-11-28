@@ -98,6 +98,17 @@ def initialize_database() -> None:
             balance_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (balance_kopecks >= 0),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        CREATE TABLE IF NOT EXISTS casino_daily_claims (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            claim_date DATE NOT NULL,
+            streak SMALLINT NOT NULL CHECK (streak BETWEEN 1 AND 7),
+            reward_kopecks BIGINT NOT NULL CHECK (reward_kopecks > 0),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(user_id, claim_date)
+        );
+        CREATE INDEX IF NOT EXISTS casino_daily_claims_user_date_idx
+            ON casino_daily_claims(user_id, claim_date DESC);
         CREATE TABLE IF NOT EXISTS casino_deposit_requests (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1898,6 +1909,168 @@ def roulette_history(user: User, limit: int = 12):
         "payout_kopecks": row["payout_kopecks"],
         "created_at": row["created_at"].isoformat()
     } for row in rows]}
+
+
+
+# NEON player progression. All balances and rewards are virtual credits only.
+VIP_LEVELS = [
+    {"name": "Bronze", "threshold_kopecks": 0, "next_threshold_kopecks": 10_000_000},
+    {"name": "Silver", "threshold_kopecks": 10_000_000, "next_threshold_kopecks": 100_000_000},
+    {"name": "Gold", "threshold_kopecks": 100_000_000, "next_threshold_kopecks": 1_000_000_000},
+    {"name": "Diamond", "threshold_kopecks": 1_000_000_000, "next_threshold_kopecks": None},
+]
+DAILY_REWARD_BASE_KOPECKS = 10_000  # 100 virtual RUB; streak scales to 7x.
+
+
+def casino_progress_totals(conn, user_id: int) -> dict:
+    row = conn.execute(
+        """SELECT
+             COALESCE(SUM(bet_kopecks), 0)::BIGINT AS wagered,
+             COALESCE(SUM(payout_kopecks), 0)::BIGINT AS paid,
+             COUNT(*)::BIGINT AS rounds
+           FROM (
+             SELECT bet_kopecks, payout_kopecks FROM casino_crash_rounds WHERE user_id = %s
+             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_mines_rounds WHERE user_id = %s
+             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_ladder_rounds WHERE user_id = %s
+             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_blackjack_rounds WHERE user_id = %s
+             UNION ALL SELECT bet_kopecks, payout_kopecks FROM casino_plinko_rounds WHERE user_id = %s
+             UNION ALL SELECT total_bet_kopecks AS bet_kopecks, payout_kopecks FROM casino_roulette_rounds WHERE user_id = %s
+           ) rounds""",
+        (user_id, user_id, user_id, user_id, user_id, user_id),
+    ).fetchone()
+    return {"wagered_kopecks": int(row["wagered"]), "payout_kopecks": int(row["paid"]), "rounds": int(row["rounds"])}
+
+
+def vip_payload(wagered_kopecks: int) -> dict:
+    level_index = 0
+    for index, level in enumerate(VIP_LEVELS):
+        if wagered_kopecks >= level["threshold_kopecks"]:
+            level_index = index
+    current = VIP_LEVELS[level_index]
+    next_level = VIP_LEVELS[level_index + 1] if level_index + 1 < len(VIP_LEVELS) else None
+    if next_level:
+        progress = min(100, max(0, (wagered_kopecks - current["threshold_kopecks"]) * 100 // (next_level["threshold_kopecks"] - current["threshold_kopecks"])))
+    else:
+        progress = 100
+    return {
+        "level": current["name"],
+        "level_index": level_index,
+        "wagered_kopecks": wagered_kopecks,
+        "next_level": next_level["name"] if next_level else None,
+        "next_threshold_kopecks": next_level["threshold_kopecks"] if next_level else None,
+        "progress_percent": progress,
+        "virtual_only": True,
+    }
+
+
+def daily_bonus_payload(conn, user_id: int) -> dict:
+    row = conn.execute(
+        """SELECT claim_date, streak, reward_kopecks
+           FROM casino_daily_claims WHERE user_id = %s
+           ORDER BY claim_date DESC LIMIT 1""",
+        (user_id,),
+    ).fetchone()
+    today = datetime.now(timezone.utc).date()
+    if not row:
+        streak = 0
+        claimed_today = False
+        next_reward = DAILY_REWARD_BASE_KOPECKS
+    else:
+        last_date = row["claim_date"]
+        claimed_today = last_date == today
+        streak = int(row["streak"]) if claimed_today or last_date == today - timedelta(days=1) else 0
+        next_streak = min(7, streak + 1)
+        next_reward = DAILY_REWARD_BASE_KOPECKS * next_streak
+    return {
+        "claimed_today": claimed_today,
+        "streak": streak,
+        "next_reward_kopecks": next_reward,
+        "next_reward_rubles": next_reward / 100,
+        "next_claim_date": (today + timedelta(days=1)).isoformat() if claimed_today else today.isoformat(),
+    }
+
+
+@app.get("/v1/casino/player-center")
+def casino_player_center(user: User):
+    with pool.connection() as conn:
+        totals = casino_progress_totals(conn, user["id"])
+        daily = daily_bonus_payload(conn, user["id"])
+    return {"vip": vip_payload(totals["wagered_kopecks"]), "daily": daily, "totals": totals}
+
+
+@app.post("/v1/casino/daily-bonus/claim", status_code=201)
+def claim_casino_daily_bonus(user: User):
+    today = datetime.now(timezone.utc).date()
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            last = conn.execute(
+                """SELECT claim_date, streak FROM casino_daily_claims
+                   WHERE user_id = %s ORDER BY claim_date DESC LIMIT 1""",
+                (user["id"],),
+            ).fetchone()
+            if last and last["claim_date"] == today:
+                raise HTTPException(status_code=409, detail="Ежедневный бонус уже получен сегодня")
+            streak = min(7, int(last["streak"]) + 1) if last and last["claim_date"] == today - timedelta(days=1) else 1
+            reward = DAILY_REWARD_BASE_KOPECKS * streak
+            conn.execute(
+                """INSERT INTO casino_daily_claims(user_id, claim_date, streak, reward_kopecks)
+                   VALUES (%s, %s, %s, %s)""",
+                (user["id"], today, streak, reward),
+            )
+            conn.execute(
+                """UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW()
+                   WHERE user_id = %s""",
+                (reward, user["id"]),
+            )
+            new_balance = int(wallet["balance_kopecks"]) + reward
+    return {
+        "status": "claimed",
+        "reward_kopecks": reward,
+        "reward_rubles": reward / 100,
+        "streak": streak,
+        "balance_kopecks": new_balance,
+        "virtual_only": True,
+    }
+
+
+@app.get("/v1/casino/leaderboard")
+def casino_leaderboard(user: User, period: str = Query("all", pattern=r"^(all|week|day)$"), limit: int = Query(10, ge=1, le=50)):
+    interval = {"day": "1 day", "week": "7 days", "all": None}[period]
+    time_filter = "TRUE" if interval is None else "created_at >= NOW() - INTERVAL '" + interval + "'"
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"""WITH rounds AS (
+                SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_crash_rounds WHERE {time_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_mines_rounds WHERE {time_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_ladder_rounds WHERE {time_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_blackjack_rounds WHERE {time_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_plinko_rounds WHERE {time_filter}
+                UNION ALL SELECT user_id, total_bet_kopecks AS bet_kopecks, payout_kopecks, created_at FROM casino_roulette_rounds WHERE {time_filter}
+            )
+            SELECT u.account_id, u.username,
+                   SUM(r.bet_kopecks)::BIGINT AS wagered_kopecks,
+                   SUM(r.payout_kopecks - r.bet_kopecks)::BIGINT AS net_kopecks,
+                   COUNT(*)::BIGINT AS rounds
+            FROM rounds r JOIN users u ON u.id = r.user_id
+            GROUP BY u.id, u.account_id, u.username
+            ORDER BY net_kopecks DESC, wagered_kopecks DESC, u.username ASC
+            LIMIT %s""",
+            (limit,),
+        ).fetchall()
+    return {"period": period, "items": [
+        {"rank": index + 1, "account_id": row["account_id"], "username": row["username"],
+         "wagered_kopecks": int(row["wagered_kopecks"]), "net_kopecks": int(row["net_kopecks"]),
+         "rounds": int(row["rounds"])}
+        for index, row in enumerate(rows)
+    ], "virtual_only": True}
 
 
 class WalletDeviceRegisterRequest(BaseModel):
