@@ -68,6 +68,24 @@ def initialize_database() -> None:
             card_limit_kopecks BIGINT NOT NULL DEFAULT 5000000 CHECK (card_limit_kopecks >= 0),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        CREATE TABLE IF NOT EXISTS casino_wallets (
+            user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            balance_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (balance_kopecks >= 0),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS casino_deposit_requests (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            amount_kopecks BIGINT NOT NULL CHECK (amount_kopecks > 0),
+            status VARCHAR(16) NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 minutes'),
+            processed_at TIMESTAMPTZ,
+            transaction_id UUID
+        );
+        CREATE INDEX IF NOT EXISTS casino_deposit_user_status_idx
+            ON casino_deposit_requests(user_id, status, created_at DESC);
         """)
         conn.commit()
 
@@ -169,6 +187,10 @@ def register(body: RegisterRequest):
                     (user["id"], REGISTRATION_BONUS_KOPECKS),
                 )
                 conn.execute(
+                    "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0)",
+                    (user["id"],),
+                )
+                conn.execute(
                     """INSERT INTO transactions(id, idempotency_key, recipient_user_id,
                        amount_kopecks, kind, description)
                        VALUES (gen_random_uuid(), %s, %s, %s, 'signup_bonus', 'Бонус за регистрацию')""",
@@ -239,6 +261,188 @@ def wallet(user: User):
         "balance_kopecks": row["balance_kopecks"],
         "updated_at": row["updated_at"].isoformat(),
     }
+
+class CasinoDepositCreateRequest(BaseModel):
+    amount_kopecks: int = Field(gt=0, le=100_000_000)
+
+
+@app.get("/v1/casino/wallet")
+def casino_wallet(user: User):
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+            (user["id"],),
+        )
+        row = conn.execute(
+            "SELECT balance_kopecks, updated_at FROM casino_wallets WHERE user_id = %s",
+            (user["id"],),
+        ).fetchone()
+    return {
+        "currency": "VIRTUAL_RUB",
+        "balance_kopecks": row["balance_kopecks"],
+        "updated_at": row["updated_at"].isoformat(),
+    }
+
+
+@app.post("/v1/casino/deposit-requests", status_code=201)
+def create_casino_deposit_request(body: CasinoDepositCreateRequest, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            existing = conn.execute(
+                """SELECT id FROM casino_deposit_requests
+                   WHERE user_id = %s AND status = 'pending' AND expires_at > NOW()
+                   ORDER BY created_at DESC LIMIT 1 FOR UPDATE""",
+                (user["id"],),
+            ).fetchone()
+            if existing:
+                raise HTTPException(status_code=409, detail="У тебя уже есть ожидающий запрос. Подтверди или отклони его в NEON WALLET.")
+            row = conn.execute(
+                """INSERT INTO casino_deposit_requests(user_id, amount_kopecks)
+                   VALUES (%s, %s)
+                   RETURNING id, amount_kopecks, status, created_at, expires_at""",
+                (user["id"], body.amount_kopecks),
+            ).fetchone()
+    return {
+        "request_id": str(row["id"]),
+        "amount_kopecks": row["amount_kopecks"],
+        "status": row["status"],
+        "created_at": row["created_at"].isoformat(),
+        "expires_at": row["expires_at"].isoformat(),
+        "message": "Открой NEON WALLET и подтверди запрос на перевод.",
+    }
+
+
+@app.get("/v1/casino/deposit-requests/pending")
+def pending_casino_deposits(user: User):
+    with pool.connection() as conn:
+        conn.execute(
+            """UPDATE casino_deposit_requests SET status = 'expired', processed_at = NOW()
+               WHERE user_id = %s AND status = 'pending' AND expires_at <= NOW()""",
+            (user["id"],),
+        )
+        rows = conn.execute(
+            """SELECT id, amount_kopecks, status, created_at, expires_at
+               FROM casino_deposit_requests
+               WHERE user_id = %s AND status = 'pending' AND expires_at > NOW()
+               ORDER BY created_at ASC""",
+            (user["id"],),
+        ).fetchall()
+    return {"items": [{
+        "request_id": str(row["id"]),
+        "amount_kopecks": row["amount_kopecks"],
+        "status": row["status"],
+        "created_at": row["created_at"].isoformat(),
+        "expires_at": row["expires_at"].isoformat(),
+        "sender": "NEON CASINO",
+    } for row in rows]}
+
+
+@app.get("/v1/casino/deposit-requests/{request_id}")
+def get_casino_deposit_request(request_id: str, user: User):
+    with pool.connection() as conn:
+        row = conn.execute(
+            """SELECT id, amount_kopecks, status, created_at, expires_at, processed_at
+               FROM casino_deposit_requests WHERE id = %s::uuid AND user_id = %s""",
+            (request_id, user["id"]),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Запрос на пополнение не найден")
+    return {
+        "request_id": str(row["id"]),
+        "amount_kopecks": row["amount_kopecks"],
+        "status": row["status"],
+        "created_at": row["created_at"].isoformat(),
+        "expires_at": row["expires_at"].isoformat(),
+        "processed_at": row["processed_at"].isoformat() if row["processed_at"] else None,
+    }
+
+
+@app.post("/v1/casino/deposit-requests/{request_id}/approve")
+def approve_casino_deposit(request_id: str, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            request_row = conn.execute(
+                """SELECT id, amount_kopecks, status, expires_at
+                   FROM casino_deposit_requests
+                   WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
+                (request_id, user["id"]),
+            ).fetchone()
+            if not request_row:
+                raise HTTPException(status_code=404, detail="Запрос на пополнение не найден")
+            if request_row["status"] != "pending":
+                raise HTTPException(status_code=409, detail="Этот запрос уже обработан")
+            if request_row["expires_at"] <= datetime.now(timezone.utc):
+                conn.execute(
+                    "UPDATE casino_deposit_requests SET status = 'expired', processed_at = NOW() WHERE id = %s::uuid",
+                    (request_id,),
+                )
+                result = {"status": "expired"}
+            else:
+                settings = conn.execute(
+                    "SELECT card_frozen FROM wallet_settings WHERE user_id = %s",
+                    (user["id"],),
+                ).fetchone()
+                if settings and settings["card_frozen"]:
+                    raise HTTPException(status_code=409, detail="Карта заморожена. Исходящие операции заблокированы.")
+                amount = request_row["amount_kopecks"]
+                debit = conn.execute(
+                    """UPDATE wallets SET balance_kopecks = balance_kopecks - %s, updated_at = NOW()
+                       WHERE user_id = %s AND balance_kopecks >= %s RETURNING balance_kopecks""",
+                    (amount, user["id"], amount),
+                ).fetchone()
+                if not debit:
+                    raise HTTPException(status_code=409, detail="Недостаточно средств в NEON WALLET")
+                conn.execute(
+                    """INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0)
+                       ON CONFLICT (user_id) DO NOTHING""",
+                    (user["id"],),
+                )
+                casino = conn.execute(
+                    """UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW()
+                       WHERE user_id = %s RETURNING balance_kopecks""",
+                    (amount, user["id"]),
+                ).fetchone()
+                tx = conn.execute(
+                    """INSERT INTO transactions(id, idempotency_key, sender_user_id,
+                       amount_kopecks, kind, description)
+                       VALUES (gen_random_uuid(), %s, %s, %s, 'casino_deposit', 'Пополнение NEON CASINO')
+                       RETURNING id, created_at""",
+                    (f"casino-deposit:{request_id}", user["id"], amount),
+                ).fetchone()
+                conn.execute(
+                    """UPDATE casino_deposit_requests SET status = 'approved',
+                       processed_at = NOW(), transaction_id = %s WHERE id = %s::uuid""",
+                    (tx["id"], request_id),
+                )
+                result = {
+                    "status": "approved",
+                    "transaction_id": str(tx["id"]),
+                    "amount_kopecks": amount,
+                    "wallet_balance_kopecks": debit["balance_kopecks"],
+                    "casino_balance_kopecks": casino["balance_kopecks"],
+                    "processed_at": tx["created_at"].isoformat(),
+                }
+    return result
+
+
+@app.post("/v1/casino/deposit-requests/{request_id}/reject")
+def reject_casino_deposit(request_id: str, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """UPDATE casino_deposit_requests SET status = 'rejected', processed_at = NOW()
+                   WHERE id = %s::uuid AND user_id = %s AND status = 'pending'
+                   RETURNING id""",
+                (request_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Ожидающий запрос не найден")
+    return {"request_id": request_id, "status": "rejected"}
+
 
 
 @app.get("/v1/transactions")
