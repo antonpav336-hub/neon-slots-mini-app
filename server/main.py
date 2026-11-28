@@ -1,6 +1,7 @@
 import os
 import math
 import secrets
+import json
 import base64
 import binascii
 from datetime import datetime, timedelta, timezone
@@ -146,6 +147,25 @@ def initialize_database() -> None:
             ON casino_ladder_rounds(user_id, started_at DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS casino_ladder_one_active_per_user_idx
             ON casino_ladder_rounds(user_id) WHERE status = 'active';
+        CREATE TABLE IF NOT EXISTS casino_blackjack_rounds (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            bet_kopecks BIGINT NOT NULL CHECK (bet_kopecks > 0),
+            deck JSONB NOT NULL,
+            deck_index SMALLINT NOT NULL DEFAULT 0,
+            player_cards JSONB NOT NULL,
+            dealer_cards JSONB NOT NULL,
+            doubled BOOLEAN NOT NULL DEFAULT FALSE,
+            status VARCHAR(16) NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'won', 'lost', 'push', 'blackjack')),
+            payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0),
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            finished_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS casino_blackjack_user_history_idx
+            ON casino_blackjack_rounds(user_id, started_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS casino_blackjack_one_active_per_user_idx
+            ON casino_blackjack_rounds(user_id) WHERE status = 'active';
         CREATE UNIQUE INDEX IF NOT EXISTS casino_crash_one_active_per_user_idx
             ON casino_crash_rounds(user_id) WHERE status = 'active';
         ALTER TABLE casino_deposit_requests
@@ -500,6 +520,12 @@ def start_crash_round(body: CrashStartRequest, user: User):
             ).fetchone()
             if active_ladder:
                 raise HTTPException(status_code=409, detail="Сначала заверши активную ЛЕСЕНКУ")
+            active_blackjack = conn.execute(
+                "SELECT id FROM casino_blackjack_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active_blackjack:
+                raise HTTPException(status_code=409, detail="Сначала заверши активный BLACKJACK")
             if wallet["balance_kopecks"] < body.bet_kopecks:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
             conn.execute(
@@ -703,7 +729,11 @@ def start_mines_round(body: MinesStartRequest, user: User):
                 "SELECT id FROM casino_ladder_rounds WHERE user_id = %s AND status = 'active'",
                 (user["id"],),
             ).fetchone()
-            if active_crash or active_mines or active_ladder:
+            active_blackjack = conn.execute(
+                "SELECT id FROM casino_blackjack_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active_crash or active_mines or active_ladder or active_blackjack:
                 raise HTTPException(status_code=409, detail="Сначала заверши активную игру")
             if wallet["balance_kopecks"] < body.bet_kopecks:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
@@ -897,7 +927,11 @@ def start_ladder_round(body: LadderStartRequest, user: User):
                 "SELECT id FROM casino_ladder_rounds WHERE user_id = %s AND status = 'active'",
                 (user["id"],),
             ).fetchone()
-            if active_crash or active_mines or active_ladder:
+            active_blackjack = conn.execute(
+                "SELECT id FROM casino_blackjack_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active_crash or active_mines or active_ladder or active_blackjack:
                 raise HTTPException(status_code=409, detail="Сначала заверши активную игру")
             if wallet["balance_kopecks"] < body.bet_kopecks:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
@@ -1026,6 +1060,260 @@ def ladder_history(user: User, limit: int = 10):
     } for row in rows]}
 
 
+
+
+
+class BlackjackStartRequest(BaseModel):
+    bet_kopecks: int = Field(gt=0, le=100_000_000)
+
+
+class BlackjackActionRequest(BaseModel):
+    action: str = Field(pattern=r"^(hit|stand|double)$")
+
+
+def blackjack_deck() -> list[dict]:
+    ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+    suits = ["♠", "♥", "♦", "♣"]
+    deck = [{"rank": rank, "suit": suit} for _ in range(6) for suit in suits for rank in ranks]
+    secrets.SystemRandom().shuffle(deck)
+    return deck
+
+
+def blackjack_score(cards: list[dict]) -> tuple[int, bool]:
+    total, aces = 0, 0
+    for card in cards:
+        rank = card["rank"]
+        if rank == "A":
+            total += 11
+            aces += 1
+        elif rank in ("K", "Q", "J"):
+            total += 10
+        else:
+            total += int(rank)
+    while total > 21 and aces:
+        total -= 10
+        aces -= 1
+    return total, aces > 0
+
+
+def blackjack_natural(cards: list[dict]) -> bool:
+    return len(cards) == 2 and blackjack_score(cards)[0] == 21
+
+
+def blackjack_draw(deck: list[dict], index: int) -> tuple[dict, int]:
+    if index >= len(deck):
+        raise HTTPException(status_code=409, detail="Колода закончилась — начни новый раунд")
+    return deck[index], index + 1
+
+
+def blackjack_payload(row: dict, reveal: bool = False) -> dict:
+    player = row["player_cards"] or []
+    dealer = row["dealer_cards"] or []
+    return {
+        "round_id": str(row["id"]), "status": row["status"],
+        "bet_kopecks": row["bet_kopecks"], "doubled": bool(row["doubled"]),
+        "player_cards": player, "dealer_cards": dealer if reveal else dealer[:1],
+        "dealer_hidden": not reveal, "player_value": blackjack_score(player)[0],
+        "dealer_value": blackjack_score(dealer)[0] if reveal else None,
+        "payout_kopecks": row["payout_kopecks"],
+        "started_at": row["started_at"].isoformat(),
+        "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+    }
+
+
+def blackjack_settle(conn, row: dict, result: str, payout: int) -> dict:
+    if payout:
+        conn.execute(
+            "UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW() WHERE user_id = %s",
+            (payout, row["user_id"]),
+        )
+    return conn.execute(
+        """UPDATE casino_blackjack_rounds SET status = %s, payout_kopecks = %s, finished_at = NOW()
+           WHERE id = %s
+           RETURNING id, user_id, bet_kopecks, doubled, player_cards, dealer_cards,
+                     status, payout_kopecks, started_at, finished_at""",
+        (result, payout, row["id"]),
+    ).fetchone()
+
+
+@app.post("/v1/casino/blackjack/start", status_code=201)
+def start_blackjack_round(body: BlackjackStartRequest, user: User):
+    deck = blackjack_deck()
+    player, dealer, index = [], [], 0
+    for target in (player, dealer, player, dealer):
+        card, index = blackjack_draw(deck, index)
+        target.append(card)
+    player_nat, dealer_nat = blackjack_natural(player), blackjack_natural(dealer)
+    result, payout = "active", 0
+    if player_nat and dealer_nat:
+        result, payout = "push", body.bet_kopecks * 2
+    elif player_nat:
+        result, payout = "blackjack", body.bet_kopecks * 5 // 2
+    elif dealer_nat:
+        result = "lost"
+
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            for table, game in [
+                ("casino_crash_rounds", "CRASH"), ("casino_mines_rounds", "MINES"),
+                ("casino_ladder_rounds", "ЛЕСЕНКА"), ("casino_blackjack_rounds", "BLACKJACK")
+            ]:
+                active = conn.execute(
+                    f"SELECT id FROM {table} WHERE user_id = %s AND status = 'active'",
+                    (user["id"],),
+                ).fetchone()
+                if active:
+                    raise HTTPException(status_code=409, detail=f"Сначала заверши активную игру: {game}")
+            if wallet["balance_kopecks"] < body.bet_kopecks:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+            conn.execute(
+                "UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s, updated_at = NOW() WHERE user_id = %s",
+                (body.bet_kopecks, user["id"]),
+            )
+            row = conn.execute(
+                """INSERT INTO casino_blackjack_rounds(
+                       user_id, bet_kopecks, deck, deck_index, player_cards, dealer_cards, status, payout_kopecks
+                   ) VALUES (%s, %s, %s::jsonb, %s, %s::jsonb, %s::jsonb, %s, %s)
+                   RETURNING id, user_id, bet_kopecks, doubled, player_cards, dealer_cards,
+                             status, payout_kopecks, started_at, finished_at""",
+                (user["id"], body.bet_kopecks, json.dumps(deck), index,
+                 json.dumps(player), json.dumps(dealer), result, payout),
+            ).fetchone()
+            if payout:
+                conn.execute(
+                    "UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW() WHERE user_id = %s",
+                    (payout, user["id"]),
+                )
+    return blackjack_payload(row, reveal=(result != "active"))
+
+
+@app.get("/v1/casino/blackjack-active")
+def get_active_blackjack_round(user: User):
+    with pool.connection() as conn:
+        row = conn.execute(
+            """SELECT id, user_id, bet_kopecks, deck, deck_index, player_cards, dealer_cards,
+                      doubled, status, payout_kopecks, started_at, finished_at
+               FROM casino_blackjack_rounds WHERE user_id = %s AND status = 'active'
+               ORDER BY started_at DESC LIMIT 1""",
+            (user["id"],),
+        ).fetchone()
+    return {"round": blackjack_payload(row) if row else None}
+
+
+@app.post("/v1/casino/blackjack/{round_id}/action")
+def blackjack_action(round_id: str, body: BlackjackActionRequest, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """SELECT id, user_id, bet_kopecks, deck, deck_index, player_cards, dealer_cards,
+                          doubled, status, payout_kopecks, started_at, finished_at
+                   FROM casino_blackjack_rounds WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
+                (round_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Раунд BLACKJACK не найден")
+            if row["status"] != "active":
+                raise HTTPException(status_code=409, detail="Раунд уже завершён")
+            deck, index = row["deck"], row["deck_index"]
+            player, dealer = row["player_cards"], row["dealer_cards"]
+            bet, action = row["bet_kopecks"], body.action
+            doubled = bool(row["doubled"])
+
+            if action == "double":
+                if len(player) != 2 or doubled:
+                    raise HTTPException(status_code=409, detail="Удвоение доступно только на первых двух картах")
+                wallet = conn.execute(
+                    "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                    (user["id"],),
+                ).fetchone()
+                if wallet["balance_kopecks"] < bet:
+                    raise HTTPException(status_code=409, detail="Недостаточно средств для удвоения")
+                conn.execute(
+                    "UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s, updated_at = NOW() WHERE user_id = %s",
+                    (bet, user["id"]),
+                )
+                bet *= 2
+                doubled = True
+                card, index = blackjack_draw(deck, index)
+                player = player + [card]
+                if blackjack_score(player)[0] > 21:
+                    updated = conn.execute(
+                        """UPDATE casino_blackjack_rounds SET bet_kopecks = %s, deck_index = %s,
+                               player_cards = %s::jsonb, doubled = TRUE, status = 'lost', finished_at = NOW()
+                           WHERE id = %s
+                           RETURNING id, user_id, bet_kopecks, doubled, player_cards, dealer_cards,
+                                     status, payout_kopecks, started_at, finished_at""",
+                        (bet, index, json.dumps(player), row["id"]),
+                    ).fetchone()
+                    return blackjack_payload(updated, reveal=True)
+                action = "stand"
+            elif action == "hit":
+                card, index = blackjack_draw(deck, index)
+                player = player + [card]
+                if blackjack_score(player)[0] > 21:
+                    updated = conn.execute(
+                        """UPDATE casino_blackjack_rounds SET deck_index = %s, player_cards = %s::jsonb,
+                               status = 'lost', finished_at = NOW()
+                           WHERE id = %s
+                           RETURNING id, user_id, bet_kopecks, doubled, player_cards, dealer_cards,
+                                     status, payout_kopecks, started_at, finished_at""",
+                        (index, json.dumps(player), row["id"]),
+                    ).fetchone()
+                    return blackjack_payload(updated, reveal=True)
+                updated = conn.execute(
+                    """UPDATE casino_blackjack_rounds SET deck_index = %s, player_cards = %s::jsonb
+                       WHERE id = %s
+                       RETURNING id, user_id, bet_kopecks, doubled, player_cards, dealer_cards,
+                                 status, payout_kopecks, started_at, finished_at""",
+                    (index, json.dumps(player), row["id"]),
+                ).fetchone()
+                return blackjack_payload(updated)
+
+            while blackjack_score(dealer)[0] < 17:
+                card, index = blackjack_draw(deck, index)
+                dealer = dealer + [card]
+            pv, dv = blackjack_score(player)[0], blackjack_score(dealer)[0]
+            if dv > 21 or pv > dv:
+                result, payout = "won", bet * 2
+            elif pv == dv:
+                result, payout = "push", bet
+            else:
+                result, payout = "lost", 0
+            updated = conn.execute(
+                """UPDATE casino_blackjack_rounds SET bet_kopecks = %s, deck_index = %s,
+                       player_cards = %s::jsonb, dealer_cards = %s::jsonb, doubled = %s
+                   WHERE id = %s
+                   RETURNING id, user_id, bet_kopecks, doubled, player_cards, dealer_cards,
+                             status, payout_kopecks, started_at, finished_at""",
+                (bet, index, json.dumps(player), json.dumps(dealer), doubled, row["id"]),
+            ).fetchone()
+            updated = blackjack_settle(conn, updated, result, payout)
+    return blackjack_payload(updated, reveal=True)
+
+
+@app.get("/v1/casino/blackjack-history")
+def blackjack_history(user: User, limit: int = 10):
+    limit = max(1, min(limit, 30))
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT id, bet_kopecks, status, payout_kopecks, started_at
+               FROM casino_blackjack_rounds WHERE user_id = %s
+               ORDER BY started_at DESC LIMIT %s""",
+            (user["id"], limit),
+        ).fetchall()
+    return {"items": [{
+        "round_id": str(row["id"]), "status": row["status"],
+        "bet_kopecks": row["bet_kopecks"], "payout_kopecks": row["payout_kopecks"],
+        "started_at": row["started_at"].isoformat(),
+    } for row in rows]}
 
 
 class WalletDeviceRegisterRequest(BaseModel):
