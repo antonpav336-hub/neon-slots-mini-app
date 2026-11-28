@@ -895,6 +895,12 @@ def start_crash_round(body: CrashStartRequest, user: User):
             ).fetchone()
             if active_blackjack:
                 raise HTTPException(status_code=409, detail="Сначала заверши активный BLACKJACK")
+            active_extended = conn.execute(
+                "SELECT id FROM casino_extended_rounds WHERE user_id = %s AND status = 'active' LIMIT 1",
+                (user["id"],),
+            ).fetchone()
+            if active_extended:
+                raise HTTPException(status_code=409, detail="Сначала заверши активную игру")
             if wallet["balance_kopecks"] < body.bet_kopecks:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
             conn.execute(
@@ -1117,7 +1123,11 @@ def start_mines_round(body: MinesStartRequest, user: User):
                 "SELECT id FROM casino_blackjack_rounds WHERE user_id = %s AND status = 'active'",
                 (user["id"],),
             ).fetchone()
-            if active_crash or active_mines or active_ladder or active_blackjack:
+            active_extended = conn.execute(
+                "SELECT id FROM casino_extended_rounds WHERE user_id = %s AND status = 'active' LIMIT 1",
+                (user["id"],),
+            ).fetchone()
+            if active_crash or active_mines or active_ladder or active_blackjack or active_extended:
                 raise HTTPException(status_code=409, detail="Сначала заверши активную игру")
             if wallet["balance_kopecks"] < body.bet_kopecks:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
