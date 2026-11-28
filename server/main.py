@@ -2222,17 +2222,18 @@ def claim_casino_daily_bonus(user: User):
 @app.get("/v1/casino/leaderboard")
 def casino_leaderboard(user: User, period: str = Query("all", pattern=r"^(all|week|day)$"), limit: int = Query(10, ge=1, le=50)):
     interval = {"day": "1 day", "week": "7 days", "all": None}[period]
-    time_filter = "TRUE" if interval is None else "created_at >= NOW() - INTERVAL '" + interval + "'"
+    started_filter = "TRUE" if interval is None else "started_at >= NOW() - INTERVAL '" + interval + "'"
+    created_filter = "TRUE" if interval is None else "created_at >= NOW() - INTERVAL '" + interval + "'"
     with pool.connection() as conn:
         rows = conn.execute(
             f"""WITH rounds AS (
-                SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_crash_rounds WHERE status <> 'active' AND {time_filter}
-                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_mines_rounds WHERE status <> 'active' AND {time_filter}
-                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_ladder_rounds WHERE status <> 'active' AND {time_filter}
-                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_blackjack_rounds WHERE status <> 'active' AND {time_filter}
-                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_plinko_rounds WHERE {time_filter}
-                UNION ALL SELECT user_id, total_bet_kopecks AS bet_kopecks, payout_kopecks, created_at FROM casino_roulette_rounds WHERE {time_filter}
-                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_instant_rounds WHERE {time_filter}
+                SELECT user_id, bet_kopecks, payout_kopecks, started_at AS created_at FROM casino_crash_rounds WHERE status <> 'active' AND {started_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, started_at AS created_at FROM casino_mines_rounds WHERE status <> 'active' AND {started_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, started_at AS created_at FROM casino_ladder_rounds WHERE status <> 'active' AND {started_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, started_at AS created_at FROM casino_blackjack_rounds WHERE status <> 'active' AND {started_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_plinko_rounds WHERE {created_filter}
+                UNION ALL SELECT user_id, total_bet_kopecks AS bet_kopecks, payout_kopecks, created_at FROM casino_roulette_rounds WHERE {created_filter}
+                UNION ALL SELECT user_id, bet_kopecks, payout_kopecks, created_at FROM casino_instant_rounds WHERE {created_filter}
             )
             SELECT u.account_id, u.username,
                    SUM(r.bet_kopecks)::BIGINT AS wagered_kopecks,
