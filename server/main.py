@@ -176,6 +176,11 @@ def initialize_database() -> None:
             payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        ALTER TABLE casino_roulette_rounds
+            ADD COLUMN IF NOT EXISTS request_key VARCHAR(64);
+        UPDATE casino_roulette_rounds SET request_key = gen_random_uuid()::text
+            WHERE request_key IS NULL;
+        ALTER TABLE casino_roulette_rounds ALTER COLUMN request_key SET NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS casino_roulette_request_key_idx
             ON casino_roulette_rounds(user_id, request_key);
         CREATE INDEX IF NOT EXISTS casino_roulette_user_history_idx
