@@ -82,6 +82,7 @@ def initialize_database() -> None:
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             amount_kopecks BIGINT NOT NULL CHECK (amount_kopecks > 0),
+            approval_nonce VARCHAR(128) NOT NULL,
             status VARCHAR(16) NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -97,6 +98,12 @@ def initialize_database() -> None:
             last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (user_id, device_id)
         );
+        ALTER TABLE casino_deposit_requests
+            ADD COLUMN IF NOT EXISTS approval_nonce VARCHAR(128);
+        UPDATE casino_deposit_requests SET approval_nonce = gen_random_uuid()::text
+            WHERE approval_nonce IS NULL;
+        ALTER TABLE casino_deposit_requests
+            ALTER COLUMN approval_nonce SET NOT NULL;
         CREATE INDEX IF NOT EXISTS casino_deposit_user_status_idx
             ON casino_deposit_requests(user_id, status, created_at DESC);
         """)
