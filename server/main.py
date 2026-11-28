@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, Field
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+from server.extended_casino import initialize_extended_games, register_extended_routes
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 JWT_SECRET = os.environ["JWT_SECRET"]
@@ -262,6 +263,7 @@ def initialize_database() -> None:
 @app.on_event("startup")
 def startup() -> None:
     initialize_database()
+    initialize_extended_games(pool)
 
 
 @app.on_event("shutdown")
@@ -323,6 +325,7 @@ def current_user(authorization: Annotated[str | None, Header()] = None) -> dict:
 
 
 User = Annotated[dict, Depends(current_user)]
+register_extended_routes(app, pool, current_user)
 
 
 def require_admin(user: User) -> dict:
