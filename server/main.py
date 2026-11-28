@@ -1,4 +1,5 @@
 import os
+import math
 import secrets
 import base64
 import binascii
@@ -98,6 +99,22 @@ def initialize_database() -> None:
             last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (user_id, device_id)
         );
+        CREATE TABLE IF NOT EXISTS casino_crash_rounds (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            bet_kopecks BIGINT NOT NULL CHECK (bet_kopecks > 0),
+            crash_multiplier NUMERIC(10,2) NOT NULL CHECK (crash_multiplier >= 1.00),
+            status VARCHAR(16) NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'crashed', 'cashed_out')),
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            finished_at TIMESTAMPTZ,
+            cashout_multiplier NUMERIC(10,2),
+            payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0)
+        );
+        CREATE INDEX IF NOT EXISTS casino_crash_user_history_idx
+            ON casino_crash_rounds(user_id, started_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS casino_crash_one_active_per_user_idx
+            ON casino_crash_rounds(user_id) WHERE status = 'active';
         ALTER TABLE casino_deposit_requests
             ADD COLUMN IF NOT EXISTS approval_nonce VARCHAR(128);
         UPDATE casino_deposit_requests SET approval_nonce = gen_random_uuid()::text
@@ -381,6 +398,166 @@ def get_casino_deposit_request(request_id: str, user: User):
         "expires_at": row["expires_at"].isoformat(),
         "processed_at": row["processed_at"].isoformat() if row["processed_at"] else None,
     }
+
+
+
+class CrashStartRequest(BaseModel):
+    bet_kopecks: int = Field(gt=0, le=100_000_000)
+
+
+def crash_multiplier_for_elapsed(started_at: datetime) -> float:
+    elapsed = max(0.0, (datetime.now(timezone.utc) - started_at).total_seconds())
+    return min(100.0, math.exp((elapsed / 12.0) * math.log(2.0)))
+
+
+def create_crash_point() -> float:
+    # Server-only crash point with a 1% edge and a 100x cap.
+    roll = secrets.randbelow(10_000_000)
+    value = min(100.0, max(1.0, (0.99 * 10_000_000) / (10_000_000 - roll)))
+    return math.floor(value * 100) / 100
+
+
+def crash_round_payload(row: dict, now_multiplier: float | None = None) -> dict:
+    multiplier = now_multiplier if now_multiplier is not None else float(row["crash_multiplier"])
+    return {
+        "round_id": str(row["id"]),
+        "status": row["status"],
+        "bet_kopecks": row["bet_kopecks"],
+        "current_multiplier": round(multiplier, 2),
+        "final_multiplier": float(row["cashout_multiplier"]) if row["cashout_multiplier"] is not None else (float(row["crash_multiplier"]) if row["status"] == "crashed" else None),
+        "payout_kopecks": row["payout_kopecks"],
+        "started_at": row["started_at"].isoformat(),
+        "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+    }
+
+
+@app.post("/v1/casino/crash/start", status_code=201)
+def start_crash_round(body: CrashStartRequest, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            active = conn.execute(
+                "SELECT id FROM casino_crash_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active:
+                raise HTTPException(status_code=409, detail="У тебя уже идёт раунд CRASH")
+            if wallet["balance_kopecks"] < body.bet_kopecks:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+            conn.execute(
+                "UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s, updated_at = NOW() WHERE user_id = %s",
+                (body.bet_kopecks, user["id"]),
+            )
+            row = conn.execute(
+                """INSERT INTO casino_crash_rounds(user_id, bet_kopecks, crash_multiplier)
+                   VALUES (%s, %s, %s)
+                   RETURNING id, user_id, bet_kopecks, crash_multiplier, status,
+                             started_at, finished_at, cashout_multiplier, payout_kopecks""",
+                (user["id"], body.bet_kopecks, create_crash_point()),
+            ).fetchone()
+    return {
+        "round_id": str(row["id"]),
+        "status": "active",
+        "bet_kopecks": row["bet_kopecks"],
+        "current_multiplier": 1.00,
+        "message": "Раунд начался",
+    }
+
+
+@app.get("/v1/casino/crash/{round_id}")
+def get_crash_round(round_id: str, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """SELECT id, user_id, bet_kopecks, crash_multiplier, status, started_at,
+                          finished_at, cashout_multiplier, payout_kopecks
+                   FROM casino_crash_rounds WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
+                (round_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Раунд CRASH не найден")
+            current = crash_multiplier_for_elapsed(row["started_at"])
+            if row["status"] == "active" and current >= float(row["crash_multiplier"]):
+                row = conn.execute(
+                    """UPDATE casino_crash_rounds SET status = 'crashed', finished_at = NOW()
+                       WHERE id = %s RETURNING id, user_id, bet_kopecks, crash_multiplier, status,
+                         started_at, finished_at, cashout_multiplier, payout_kopecks""",
+                    (row["id"],),
+                ).fetchone()
+            elif row["status"] == "active":
+                return crash_round_payload(row, current)
+    return crash_round_payload(row)
+
+
+@app.post("/v1/casino/crash/{round_id}/cashout")
+def cashout_crash_round(round_id: str, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """SELECT id, user_id, bet_kopecks, crash_multiplier, status, started_at,
+                          finished_at, cashout_multiplier, payout_kopecks
+                   FROM casino_crash_rounds WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
+                (round_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Раунд CRASH не найден")
+            if row["status"] != "active":
+                raise HTTPException(status_code=409, detail="Раунд уже завершён")
+            current = crash_multiplier_for_elapsed(row["started_at"])
+            if current >= float(row["crash_multiplier"]):
+                row = conn.execute(
+                    """UPDATE casino_crash_rounds SET status = 'crashed', finished_at = NOW()
+                       WHERE id = %s RETURNING id, user_id, bet_kopecks, crash_multiplier, status,
+                         started_at, finished_at, cashout_multiplier, payout_kopecks""",
+                    (row["id"],),
+                ).fetchone()
+                result = crash_round_payload(row)
+                result["message"] = "Не успел забрать — раунд завершился"
+            else:
+                multiplier = math.floor(current * 100) / 100
+                payout = int(row["bet_kopecks"] * multiplier)
+                conn.execute(
+                    "UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW() WHERE user_id = %s",
+                    (payout, user["id"]),
+                )
+                row = conn.execute(
+                    """UPDATE casino_crash_rounds SET status = 'cashed_out', finished_at = NOW(),
+                         cashout_multiplier = %s, payout_kopecks = %s
+                       WHERE id = %s RETURNING id, user_id, bet_kopecks, crash_multiplier, status,
+                         started_at, finished_at, cashout_multiplier, payout_kopecks""",
+                    (multiplier, payout, row["id"]),
+                ).fetchone()
+                result = crash_round_payload(row)
+                result["message"] = "Выигрыш зачислен на баланс казино"
+    return result
+
+
+@app.get("/v1/casino/crash/history")
+def crash_history(user: User, limit: int = 8):
+    limit = max(1, min(limit, 30))
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT id, bet_kopecks, status, crash_multiplier, cashout_multiplier,
+                      payout_kopecks, started_at
+               FROM casino_crash_rounds WHERE user_id = %s
+               ORDER BY started_at DESC LIMIT %s""",
+            (user["id"], limit),
+        ).fetchall()
+    return {"items": [{
+        "round_id": str(row["id"]),
+        "status": row["status"],
+        "bet_kopecks": row["bet_kopecks"],
+        "final_multiplier": float(row["cashout_multiplier"]) if row["status"] == "cashed_out" else float(row["crash_multiplier"]),
+        "payout_kopecks": row["payout_kopecks"],
+        "started_at": row["started_at"].isoformat(),
+    } for row in rows]}
 
 
 class WalletDeviceRegisterRequest(BaseModel):
