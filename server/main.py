@@ -166,6 +166,17 @@ def initialize_database() -> None:
             ON casino_blackjack_rounds(user_id, started_at DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS casino_blackjack_one_active_per_user_idx
             ON casino_blackjack_rounds(user_id) WHERE status = 'active';
+        CREATE TABLE IF NOT EXISTS casino_roulette_rounds (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            bets JSONB NOT NULL,
+            winning_number SMALLINT NOT NULL CHECK (winning_number BETWEEN 0 AND 36),
+            total_bet_kopecks BIGINT NOT NULL CHECK (total_bet_kopecks > 0),
+            payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS casino_roulette_user_history_idx
+            ON casino_roulette_rounds(user_id, created_at DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS casino_crash_one_active_per_user_idx
             ON casino_crash_rounds(user_id) WHERE status = 'active';
         ALTER TABLE casino_deposit_requests
@@ -1313,6 +1324,117 @@ def blackjack_history(user: User, limit: int = 10):
         "round_id": str(row["id"]), "status": row["status"],
         "bet_kopecks": row["bet_kopecks"], "payout_kopecks": row["payout_kopecks"],
         "started_at": row["started_at"].isoformat(),
+    } for row in rows]}
+
+
+
+class RouletteBetRequest(BaseModel):
+    selection: str = Field(pattern=r"^(number|color|parity|half|dozen|column)$")
+    value: str = Field(min_length=1, max_length=8)
+    amount_kopecks: int = Field(gt=0, le=100_000_000)
+
+
+class RouletteSpinRequest(BaseModel):
+    bets: list[RouletteBetRequest] = Field(min_length=1, max_length=36)
+
+
+ROULETTE_RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
+
+
+def roulette_bet_wins(bet: RouletteBetRequest, number: int) -> tuple[bool, int]:
+    selection, value = bet.selection, bet.value
+    if selection == "number":
+        if not value.isdigit() or not 0 <= int(value) <= 36:
+            raise HTTPException(status_code=422, detail="Некорректное число рулетки")
+        return int(value) == number, 36
+    if selection == "color":
+        if value not in ("red", "black"):
+            raise HTTPException(status_code=422, detail="Некорректный цвет")
+        return number != 0 and ((number in ROULETTE_RED_NUMBERS) == (value == "red")), 2
+    if selection == "parity":
+        if value not in ("odd", "even"):
+            raise HTTPException(status_code=422, detail="Некорректная чётность")
+        return number != 0 and (("odd" if number % 2 else "even") == value), 2
+    if selection == "half":
+        if value not in ("low", "high"):
+            raise HTTPException(status_code=422, detail="Некорректный диапазон")
+        return (1 <= number <= 18 if value == "low" else 19 <= number <= 36), 2
+    if selection in ("dozen", "column"):
+        if value not in ("1", "2", "3"):
+            raise HTTPException(status_code=422, detail="Некорректная дюжина или колонка")
+        target = int(value)
+        actual = ((number - 1) // 12 + 1) if selection == "dozen" and number else (((number - 1) % 3 + 1) if number else 0)
+        return number != 0 and actual == target, 3
+    raise HTTPException(status_code=422, detail="Неизвестный тип ставки")
+
+
+@app.post("/v1/casino/roulette/spin", status_code=201)
+def spin_roulette(body: RouletteSpinRequest, user: User):
+    total_bet = sum(bet.amount_kopecks for bet in body.bets)
+    if total_bet > 100_000_000:
+        raise HTTPException(status_code=422, detail="Общая сумма ставок не может превышать 1 000 000 ₽")
+    winning_number = secrets.randbelow(37)
+    payout = 0
+    for bet in body.bets:
+        won, odds = roulette_bet_wins(bet, winning_number)
+        if won:
+            payout += bet.amount_kopecks * odds
+    if payout > 2_000_000_000:
+        raise HTTPException(status_code=422, detail="Слишком большая потенциальная выплата")
+    stored_bets = [bet.model_dump() for bet in body.bets]
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            for table, game in [
+                ("casino_crash_rounds", "CRASH"), ("casino_mines_rounds", "MINES"),
+                ("casino_ladder_rounds", "ЛЕСЕНКА"), ("casino_blackjack_rounds", "BLACKJACK")
+            ]:
+                active = conn.execute(
+                    f"SELECT id FROM {table} WHERE user_id = %s AND status = 'active'",
+                    (user["id"],),
+                ).fetchone()
+                if active:
+                    raise HTTPException(status_code=409, detail=f"Сначала заверши активную игру: {game}")
+            if wallet["balance_kopecks"] < total_bet:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+            conn.execute(
+                "UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s + %s, updated_at = NOW() WHERE user_id = %s",
+                (total_bet, payout, user["id"]),
+            )
+            row = conn.execute(
+                """INSERT INTO casino_roulette_rounds(user_id, bets, winning_number, total_bet_kopecks, payout_kopecks)
+                   VALUES (%s, %s::jsonb, %s, %s, %s)
+                   RETURNING id, created_at""",
+                (user["id"], json.dumps(stored_bets), winning_number, total_bet, payout),
+            ).fetchone()
+    color = "green" if winning_number == 0 else ("red" if winning_number in ROULETTE_RED_NUMBERS else "black")
+    return {
+        "round_id": str(row["id"]), "winning_number": winning_number, "color": color,
+        "total_bet_kopecks": total_bet, "payout_kopecks": payout,
+        "net_kopecks": payout - total_bet, "created_at": row["created_at"].isoformat()
+    }
+
+
+@app.get("/v1/casino/roulette-history")
+def roulette_history(user: User, limit: int = 12):
+    limit = max(1, min(limit, 30))
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT winning_number, created_at FROM casino_roulette_rounds
+               WHERE user_id = %s ORDER BY created_at DESC LIMIT %s""",
+            (user["id"], limit),
+        ).fetchall()
+    return {"items": [{
+        "winning_number": row["winning_number"],
+        "color": "green" if row["winning_number"] == 0 else ("red" if row["winning_number"] in ROULETTE_RED_NUMBERS else "black"),
+        "created_at": row["created_at"].isoformat()
     } for row in rows]}
 
 
