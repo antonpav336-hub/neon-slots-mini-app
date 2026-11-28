@@ -800,7 +800,7 @@ def get_casino_deposit_request(request_id: str, user: User):
 
 
 class CrashStartRequest(BaseModel):
-    bet_kopecks: int = Field(gt=0, le=100_000_000)
+    bet_kopecks: int = Field(gt=0, le=100_000_000_000)
 
 
 def crash_multiplier_for_elapsed(started_at: datetime) -> float:
@@ -1006,7 +1006,7 @@ def crash_history(user: User, limit: int = 8):
 
 
 class PlinkoDropRequest(BaseModel):
-    bet_kopecks: int = Field(gt=0, le=100_000_000)
+    bet_kopecks: int = Field(gt=0, le=100_000_000_000)
     request_key: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
 
 
@@ -1014,7 +1014,7 @@ PLINKO_MULTIPLIERS = [8.00, 4.00, 2.00, 1.40, 1.10, 0.80, 0.50, 0.80, 1.10, 1.40
 
 
 class MinesStartRequest(BaseModel):
-    bet_kopecks: int = Field(gt=0, le=100_000_000)
+    bet_kopecks: int = Field(gt=0, le=100_000_000_000)
     mine_count: int = Field(ge=1, le=24)
 
 
@@ -1218,7 +1218,7 @@ def mines_history(user: User, limit: int = 10):
 
 
 class LadderStartRequest(BaseModel):
-    bet_kopecks: int = Field(gt=0, le=100_000_000)
+    bet_kopecks: int = Field(gt=0, le=100_000_000_000)
 
 
 class LadderPickRequest(BaseModel):
@@ -1411,7 +1411,7 @@ def ladder_history(user: User, limit: int = 10):
 
 
 class BlackjackStartRequest(BaseModel):
-    bet_kopecks: int = Field(gt=0, le=100_000_000)
+    bet_kopecks: int = Field(gt=0, le=100_000_000_000)
 
 
 class BlackjackActionRequest(BaseModel):
@@ -1667,7 +1667,7 @@ def blackjack_history(user: User, limit: int = 10):
 class RouletteBetRequest(BaseModel):
     selection: str = Field(pattern=r"^(number|color|parity|half|dozen|column)$")
     value: str = Field(min_length=1, max_length=8)
-    amount_kopecks: int = Field(gt=0, le=100_000_000)
+    amount_kopecks: int = Field(gt=0, le=100_000_000_000)
 
 
 class RouletteSpinRequest(BaseModel):
@@ -1708,8 +1708,8 @@ def roulette_bet_wins(bet: RouletteBetRequest, number: int) -> tuple[bool, int]:
 @app.post("/v1/casino/roulette/spin", status_code=201)
 def spin_roulette(body: RouletteSpinRequest, user: User):
     total_bet = sum(bet.amount_kopecks for bet in body.bets)
-    if total_bet > 100_000_000:
-        raise HTTPException(status_code=422, detail="Общая сумма ставок не может превышать 1 000 000 ₽")
+    if total_bet > 100_000_000_000:
+        raise HTTPException(status_code=422, detail="Общая сумма ставок не может превышать 1 000 000 000 ₽")
     stored_bets = [bet.model_dump() for bet in body.bets]
     with pool.connection() as conn:
         with conn.transaction():
