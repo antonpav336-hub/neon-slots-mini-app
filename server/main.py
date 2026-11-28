@@ -429,8 +429,8 @@ def approve_casino_deposit(request_id: str, body: CasinoDepositApprovalRequest, 
             if not device:
                 raise HTTPException(status_code=403, detail="Это устройство не зарегистрировано в NEON WALLET")
             signed_message = (
-                f"NEON-CASINO-DEPOSIT\\n{request_row['id']}\\n"
-                f"{request_row['amount_kopecks']}\\n{request_row['approval_nonce']}"
+                f"NEON-CASINO-DEPOSIT\n{request_row['id']}\n"
+                f"{request_row['amount_kopecks']}\n{request_row['approval_nonce']}"
             )
             try:
                 public_key = serialization.load_der_public_key(bytes(device["public_key_der"]))
