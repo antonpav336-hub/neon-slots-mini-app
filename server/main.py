@@ -113,6 +113,23 @@ def initialize_database() -> None:
         );
         CREATE INDEX IF NOT EXISTS casino_crash_user_history_idx
             ON casino_crash_rounds(user_id, started_at DESC);
+        CREATE TABLE IF NOT EXISTS casino_mines_rounds (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            bet_kopecks BIGINT NOT NULL CHECK (bet_kopecks > 0),
+            mine_count SMALLINT NOT NULL CHECK (mine_count BETWEEN 1 AND 24),
+            mine_cells SMALLINT[] NOT NULL,
+            opened_cells SMALLINT[] NOT NULL DEFAULT '{}',
+            status VARCHAR(16) NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'lost', 'cashed_out', 'won')),
+            payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0),
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            finished_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS casino_mines_user_history_idx
+            ON casino_mines_rounds(user_id, started_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS casino_mines_one_active_per_user_idx
+            ON casino_mines_rounds(user_id) WHERE status = 'active';
         CREATE UNIQUE INDEX IF NOT EXISTS casino_crash_one_active_per_user_idx
             ON casino_crash_rounds(user_id) WHERE status = 'active';
         ALTER TABLE casino_deposit_requests
@@ -455,6 +472,12 @@ def start_crash_round(body: CrashStartRequest, user: User):
             ).fetchone()
             if active:
                 raise HTTPException(status_code=409, detail="У тебя уже идёт раунд CRASH")
+            active_mines = conn.execute(
+                "SELECT id FROM casino_mines_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active_mines:
+                raise HTTPException(status_code=409, detail="Сначала заверши активный раунд MINES")
             if wallet["balance_kopecks"] < body.bet_kopecks:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
             conn.execute(
@@ -588,6 +611,204 @@ def crash_history(user: User, limit: int = 8):
         "status": row["status"],
         "bet_kopecks": row["bet_kopecks"],
         "final_multiplier": float(row["cashout_multiplier"]) if row["status"] == "cashed_out" else float(row["crash_multiplier"]),
+        "payout_kopecks": row["payout_kopecks"],
+        "started_at": row["started_at"].isoformat(),
+    } for row in rows]}
+
+
+
+
+class MinesStartRequest(BaseModel):
+    bet_kopecks: int = Field(gt=0, le=100_000_000)
+    mine_count: int = Field(ge=1, le=24)
+
+
+class MinesPickRequest(BaseModel):
+    cell: int = Field(ge=0, le=24)
+
+
+def mines_multiplier(mine_count: int, opened_count: int) -> float:
+    if opened_count <= 0:
+        return 1.0
+    survival = 1.0
+    for index in range(opened_count):
+        survival *= (25 - mine_count - index) / (25 - index)
+    return math.floor((0.99 / survival) * 100) / 100
+
+
+def mines_round_payload(row: dict, reveal: bool = False) -> dict:
+    opened = [int(value) for value in (row["opened_cells"] or [])]
+    payload = {
+        "round_id": str(row["id"]),
+        "status": row["status"],
+        "bet_kopecks": row["bet_kopecks"],
+        "mine_count": row["mine_count"],
+        "opened_cells": opened,
+        "safe_count": len(opened),
+        "multiplier": mines_multiplier(row["mine_count"], len(opened)),
+        "payout_kopecks": row["payout_kopecks"],
+        "started_at": row["started_at"].isoformat(),
+        "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+    }
+    if reveal:
+        payload["mine_cells"] = [int(value) for value in row["mine_cells"]]
+    return payload
+
+
+@app.post("/v1/casino/mines/start", status_code=201)
+def start_mines_round(body: MinesStartRequest, user: User):
+    cells = list(range(25))
+    mine_cells = secrets.SystemRandom().sample(cells, body.mine_count)
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            active_crash = conn.execute(
+                "SELECT id FROM casino_crash_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            active_mines = conn.execute(
+                "SELECT id FROM casino_mines_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active_crash or active_mines:
+                raise HTTPException(status_code=409, detail="Сначала заверши активную игру")
+            if wallet["balance_kopecks"] < body.bet_kopecks:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+            conn.execute(
+                "UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s, updated_at = NOW() WHERE user_id = %s",
+                (body.bet_kopecks, user["id"]),
+            )
+            row = conn.execute(
+                """INSERT INTO casino_mines_rounds(user_id, bet_kopecks, mine_count, mine_cells)
+                   VALUES (%s, %s, %s, %s)
+                   RETURNING id, user_id, bet_kopecks, mine_count, mine_cells, opened_cells,
+                             status, payout_kopecks, started_at, finished_at""",
+                (user["id"], body.bet_kopecks, body.mine_count, mine_cells),
+            ).fetchone()
+    return mines_round_payload(row)
+
+
+@app.get("/v1/casino/mines-active")
+def get_active_mines_round(user: User):
+    with pool.connection() as conn:
+        row = conn.execute(
+            """SELECT id, user_id, bet_kopecks, mine_count, mine_cells, opened_cells,
+                      status, payout_kopecks, started_at, finished_at
+               FROM casino_mines_rounds WHERE user_id = %s AND status = 'active'
+               ORDER BY started_at DESC LIMIT 1""",
+            (user["id"],),
+        ).fetchone()
+    return {"round": mines_round_payload(row) if row else None}
+
+
+@app.post("/v1/casino/mines/{round_id}/pick")
+def pick_mines_cell(round_id: str, body: MinesPickRequest, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """SELECT id, user_id, bet_kopecks, mine_count, mine_cells, opened_cells,
+                          status, payout_kopecks, started_at, finished_at
+                   FROM casino_mines_rounds WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
+                (round_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Раунд MINES не найден")
+            if row["status"] != "active":
+                raise HTTPException(status_code=409, detail="Раунд уже завершён")
+            opened = [int(value) for value in (row["opened_cells"] or [])]
+            if body.cell in opened:
+                raise HTTPException(status_code=409, detail="Эта клетка уже открыта")
+            mines = [int(value) for value in row["mine_cells"]]
+            if body.cell in mines:
+                row = conn.execute(
+                    """UPDATE casino_mines_rounds SET status = 'lost', finished_at = NOW()
+                       WHERE id = %s
+                       RETURNING id, user_id, bet_kopecks, mine_count, mine_cells, opened_cells,
+                                 status, payout_kopecks, started_at, finished_at""",
+                    (row["id"],),
+                ).fetchone()
+                return mines_round_payload(row, reveal=True)
+            opened.append(body.cell)
+            status_value = "active"
+            payout = 0
+            if len(opened) == 25 - row["mine_count"]:
+                multiplier = mines_multiplier(row["mine_count"], len(opened))
+                payout = int(row["bet_kopecks"] * multiplier)
+                status_value = "won"
+                conn.execute(
+                    "UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW() WHERE user_id = %s",
+                    (payout, user["id"]),
+                )
+            row = conn.execute(
+                """UPDATE casino_mines_rounds
+                   SET opened_cells = %s, status = %s, payout_kopecks = %s,
+                       finished_at = CASE WHEN %s <> 'active' THEN NOW() ELSE NULL END
+                   WHERE id = %s
+                   RETURNING id, user_id, bet_kopecks, mine_count, mine_cells, opened_cells,
+                             status, payout_kopecks, started_at, finished_at""",
+                (opened, status_value, payout, status_value, row["id"]),
+            ).fetchone()
+    return mines_round_payload(row, reveal=(row["status"] != "active"))
+
+
+@app.post("/v1/casino/mines/{round_id}/cashout")
+def cashout_mines_round(round_id: str, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """SELECT id, user_id, bet_kopecks, mine_count, mine_cells, opened_cells,
+                          status, payout_kopecks, started_at, finished_at
+                   FROM casino_mines_rounds WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
+                (round_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Раунд MINES не найден")
+            if row["status"] != "active":
+                raise HTTPException(status_code=409, detail="Раунд уже завершён")
+            opened_count = len(row["opened_cells"] or [])
+            if opened_count <= 0:
+                raise HTTPException(status_code=409, detail="Открой хотя бы одну безопасную клетку")
+            multiplier = mines_multiplier(row["mine_count"], opened_count)
+            payout = int(row["bet_kopecks"] * multiplier)
+            conn.execute(
+                "UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW() WHERE user_id = %s",
+                (payout, user["id"]),
+            )
+            row = conn.execute(
+                """UPDATE casino_mines_rounds
+                   SET status = 'cashed_out', payout_kopecks = %s, finished_at = NOW()
+                   WHERE id = %s
+                   RETURNING id, user_id, bet_kopecks, mine_count, mine_cells, opened_cells,
+                             status, payout_kopecks, started_at, finished_at""",
+                (payout, row["id"]),
+            ).fetchone()
+    return mines_round_payload(row, reveal=True)
+
+
+@app.get("/v1/casino/mines-history")
+def mines_history(user: User, limit: int = 10):
+    limit = max(1, min(limit, 30))
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT id, bet_kopecks, mine_count, opened_cells, mine_cells, status,
+                      payout_kopecks, started_at
+               FROM casino_mines_rounds WHERE user_id = %s
+               ORDER BY started_at DESC LIMIT %s""",
+            (user["id"], limit),
+        ).fetchall()
+    return {"items": [{
+        "round_id": str(row["id"]),
+        "status": row["status"],
+        "bet_kopecks": row["bet_kopecks"],
+        "mine_count": row["mine_count"],
+        "safe_count": len(row["opened_cells"] or []),
         "payout_kopecks": row["payout_kopecks"],
         "started_at": row["started_at"].isoformat(),
     } for row in rows]}
