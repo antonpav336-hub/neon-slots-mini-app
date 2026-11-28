@@ -2,6 +2,8 @@ name: Validate NEON WALLET API
 on:
   push:
     branches: [main, feature/server-authoritative-casino-games]
+  pull_request:
+    branches: [main]
     paths:
       - 'server/**'
       - '.github/workflows/api-check.yml'
