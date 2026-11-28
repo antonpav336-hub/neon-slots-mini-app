@@ -628,6 +628,16 @@ def register_wallet_device(body: WalletDeviceRegisterRequest, user: User):
 def approve_casino_deposit(request_id: str, body: CasinoDepositApprovalRequest, user: User):
     with pool.connection() as conn:
         with conn.transaction():
+            # Use the same lock order as request creation: casino wallet, then request.
+            # This serializes approval against a concurrent attempt to create another request.
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            conn.execute(
+                "SELECT user_id FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            )
             request_row = conn.execute(
                 """SELECT id, amount_kopecks, status, expires_at, approval_nonce
                    FROM casino_deposit_requests
@@ -676,11 +686,6 @@ def approve_casino_deposit(request_id: str, body: CasinoDepositApprovalRequest, 
                 ).fetchone()
                 if not debit:
                     raise HTTPException(status_code=409, detail="Недостаточно средств в NEON WALLET")
-                conn.execute(
-                    """INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0)
-                       ON CONFLICT (user_id) DO NOTHING""",
-                    (user["id"],),
-                )
                 casino = conn.execute(
                     """UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW()
                        WHERE user_id = %s RETURNING balance_kopecks""",
