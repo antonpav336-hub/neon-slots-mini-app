@@ -130,6 +130,22 @@ def initialize_database() -> None:
             ON casino_mines_rounds(user_id, started_at DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS casino_mines_one_active_per_user_idx
             ON casino_mines_rounds(user_id) WHERE status = 'active';
+        CREATE TABLE IF NOT EXISTS casino_ladder_rounds (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            bet_kopecks BIGINT NOT NULL CHECK (bet_kopecks > 0),
+            safe_sides SMALLINT[] NOT NULL,
+            reached_steps SMALLINT NOT NULL DEFAULT 0 CHECK (reached_steps BETWEEN 0 AND 8),
+            status VARCHAR(16) NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'lost', 'cashed_out', 'won')),
+            payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0),
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            finished_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS casino_ladder_user_history_idx
+            ON casino_ladder_rounds(user_id, started_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS casino_ladder_one_active_per_user_idx
+            ON casino_ladder_rounds(user_id) WHERE status = 'active';
         CREATE UNIQUE INDEX IF NOT EXISTS casino_crash_one_active_per_user_idx
             ON casino_crash_rounds(user_id) WHERE status = 'active';
         ALTER TABLE casino_deposit_requests
@@ -478,6 +494,12 @@ def start_crash_round(body: CrashStartRequest, user: User):
             ).fetchone()
             if active_mines:
                 raise HTTPException(status_code=409, detail="Сначала заверши активный раунд MINES")
+            active_ladder = conn.execute(
+                "SELECT id FROM casino_ladder_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active_ladder:
+                raise HTTPException(status_code=409, detail="Сначала заверши активную ЛЕСЕНКУ")
             if wallet["balance_kopecks"] < body.bet_kopecks:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
             conn.execute(
@@ -677,7 +699,11 @@ def start_mines_round(body: MinesStartRequest, user: User):
                 "SELECT id FROM casino_mines_rounds WHERE user_id = %s AND status = 'active'",
                 (user["id"],),
             ).fetchone()
-            if active_crash or active_mines:
+            active_ladder = conn.execute(
+                "SELECT id FROM casino_ladder_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active_crash or active_mines or active_ladder:
                 raise HTTPException(status_code=409, detail="Сначала заверши активную игру")
             if wallet["balance_kopecks"] < body.bet_kopecks:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
@@ -812,6 +838,194 @@ def mines_history(user: User, limit: int = 10):
         "payout_kopecks": row["payout_kopecks"],
         "started_at": row["started_at"].isoformat(),
     } for row in rows]}
+
+
+class LadderStartRequest(BaseModel):
+    bet_kopecks: int = Field(gt=0, le=100_000_000)
+
+
+class LadderPickRequest(BaseModel):
+    step: int = Field(ge=0, le=7)
+    side: int = Field(ge=0, le=1)
+
+
+def ladder_multiplier(steps: int) -> float:
+    if steps <= 0:
+        return 1.0
+    return math.floor((1.98 ** steps) * 100) / 100
+
+
+def ladder_round_payload(row: dict, reveal: bool = False) -> dict:
+    payload = {
+        "round_id": str(row["id"]),
+        "status": row["status"],
+        "bet_kopecks": row["bet_kopecks"],
+        "reached_steps": row["reached_steps"],
+        "total_steps": 8,
+        "multiplier": ladder_multiplier(row["reached_steps"]),
+        "payout_kopecks": row["payout_kopecks"],
+        "started_at": row["started_at"].isoformat(),
+        "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+    }
+    if reveal:
+        payload["safe_sides"] = [int(value) for value in row["safe_sides"]]
+    return payload
+
+
+@app.post("/v1/casino/ladder/start", status_code=201)
+def start_ladder_round(body: LadderStartRequest, user: User):
+    safe_sides = [secrets.randbelow(2) for _ in range(8)]
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            active_crash = conn.execute(
+                "SELECT id FROM casino_crash_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            active_mines = conn.execute(
+                "SELECT id FROM casino_mines_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            active_ladder = conn.execute(
+                "SELECT id FROM casino_ladder_rounds WHERE user_id = %s AND status = 'active'",
+                (user["id"],),
+            ).fetchone()
+            if active_crash or active_mines or active_ladder:
+                raise HTTPException(status_code=409, detail="Сначала заверши активную игру")
+            if wallet["balance_kopecks"] < body.bet_kopecks:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+            conn.execute(
+                "UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s, updated_at = NOW() WHERE user_id = %s",
+                (body.bet_kopecks, user["id"]),
+            )
+            row = conn.execute(
+                """INSERT INTO casino_ladder_rounds(user_id, bet_kopecks, safe_sides)
+                   VALUES (%s, %s, %s)
+                   RETURNING id, user_id, bet_kopecks, safe_sides, reached_steps, status,
+                             payout_kopecks, started_at, finished_at""",
+                (user["id"], body.bet_kopecks, safe_sides),
+            ).fetchone()
+    return ladder_round_payload(row)
+
+
+@app.get("/v1/casino/ladder-active")
+def get_active_ladder_round(user: User):
+    with pool.connection() as conn:
+        row = conn.execute(
+            """SELECT id, user_id, bet_kopecks, safe_sides, reached_steps, status,
+                      payout_kopecks, started_at, finished_at
+               FROM casino_ladder_rounds WHERE user_id = %s AND status = 'active'
+               ORDER BY started_at DESC LIMIT 1""",
+            (user["id"],),
+        ).fetchone()
+    return {"round": ladder_round_payload(row) if row else None}
+
+
+@app.post("/v1/casino/ladder/{round_id}/pick")
+def pick_ladder_step(round_id: str, body: LadderPickRequest, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """SELECT id, user_id, bet_kopecks, safe_sides, reached_steps, status,
+                          payout_kopecks, started_at, finished_at
+                   FROM casino_ladder_rounds WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
+                (round_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Раунд ЛЕСЕНКА не найден")
+            if row["status"] != "active":
+                raise HTTPException(status_code=409, detail="Раунд уже завершён")
+            if body.step != row["reached_steps"]:
+                raise HTTPException(status_code=409, detail="Сначала выбери текущую ступень")
+            if body.side != int(row["safe_sides"][body.step]):
+                row = conn.execute(
+                    """UPDATE casino_ladder_rounds SET status = 'lost', finished_at = NOW()
+                       WHERE id = %s
+                       RETURNING id, user_id, bet_kopecks, safe_sides, reached_steps, status,
+                                 payout_kopecks, started_at, finished_at""",
+                    (row["id"],),
+                ).fetchone()
+                return ladder_round_payload(row, reveal=True)
+            reached = row["reached_steps"] + 1
+            payout = 0
+            status_value = "active"
+            if reached == 8:
+                payout = int(row["bet_kopecks"] * ladder_multiplier(reached))
+                status_value = "won"
+                conn.execute(
+                    "UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW() WHERE user_id = %s",
+                    (payout, user["id"]),
+                )
+            row = conn.execute(
+                """UPDATE casino_ladder_rounds
+                   SET reached_steps = %s, status = %s, payout_kopecks = %s,
+                       finished_at = CASE WHEN %s <> 'active' THEN NOW() ELSE NULL END
+                   WHERE id = %s
+                   RETURNING id, user_id, bet_kopecks, safe_sides, reached_steps, status,
+                             payout_kopecks, started_at, finished_at""",
+                (reached, status_value, payout, status_value, row["id"]),
+            ).fetchone()
+    return ladder_round_payload(row, reveal=(row["status"] != "active"))
+
+
+@app.post("/v1/casino/ladder/{round_id}/cashout")
+def cashout_ladder_round(round_id: str, user: User):
+    with pool.connection() as conn:
+        with conn.transaction():
+            row = conn.execute(
+                """SELECT id, user_id, bet_kopecks, safe_sides, reached_steps, status,
+                          payout_kopecks, started_at, finished_at
+                   FROM casino_ladder_rounds WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
+                (round_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Раунд ЛЕСЕНКА не найден")
+            if row["status"] != "active":
+                raise HTTPException(status_code=409, detail="Раунд уже завершён")
+            if row["reached_steps"] <= 0:
+                raise HTTPException(status_code=409, detail="Поднимись хотя бы на одну ступень")
+            payout = int(row["bet_kopecks"] * ladder_multiplier(row["reached_steps"]))
+            conn.execute(
+                "UPDATE casino_wallets SET balance_kopecks = balance_kopecks + %s, updated_at = NOW() WHERE user_id = %s",
+                (payout, user["id"]),
+            )
+            row = conn.execute(
+                """UPDATE casino_ladder_rounds
+                   SET status = 'cashed_out', payout_kopecks = %s, finished_at = NOW()
+                   WHERE id = %s
+                   RETURNING id, user_id, bet_kopecks, safe_sides, reached_steps, status,
+                             payout_kopecks, started_at, finished_at""",
+                (payout, row["id"]),
+            ).fetchone()
+    return ladder_round_payload(row, reveal=True)
+
+
+@app.get("/v1/casino/ladder-history")
+def ladder_history(user: User, limit: int = 10):
+    limit = max(1, min(limit, 30))
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT id, bet_kopecks, reached_steps, status, payout_kopecks, started_at
+               FROM casino_ladder_rounds WHERE user_id = %s
+               ORDER BY started_at DESC LIMIT %s""",
+            (user["id"], limit),
+        ).fetchall()
+    return {"items": [{
+        "round_id": str(row["id"]), "status": row["status"],
+        "bet_kopecks": row["bet_kopecks"], "reached_steps": row["reached_steps"],
+        "multiplier": ladder_multiplier(row["reached_steps"]),
+        "payout_kopecks": row["payout_kopecks"],
+        "started_at": row["started_at"].isoformat(),
+    } for row in rows]}
+
+
 
 
 class WalletDeviceRegisterRequest(BaseModel):
