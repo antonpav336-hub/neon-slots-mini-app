@@ -1797,6 +1797,8 @@ def drop_plinko_ball(body: PlinkoDropRequest, user: User):
                 (user["id"], body.request_key),
             ).fetchone()
             if previous:
+                if previous["bet_kopecks"] != body.bet_kopecks:
+                    raise HTTPException(status_code=409, detail="Ключ броска уже использован с другой ставкой")
                 return {
                     "round_id": str(previous["id"]),
                     "path": [int(move) for move in previous["path"]],
@@ -1851,6 +1853,26 @@ def drop_plinko_ball(body: PlinkoDropRequest, user: User):
         "payout_kopecks": row["payout_kopecks"],
         "created_at": row["created_at"].isoformat(),
     }
+
+
+@app.get("/v1/casino/plinko-history")
+def plinko_history(user: User, limit: int = 12):
+    limit = max(1, min(limit, 30))
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT id, bet_kopecks, bucket, multiplier, payout_kopecks, created_at
+               FROM casino_plinko_rounds
+               WHERE user_id = %s ORDER BY created_at DESC LIMIT %s""",
+            (user["id"], limit),
+        ).fetchall()
+    return {"items": [{
+        "round_id": str(row["id"]),
+        "bet_kopecks": row["bet_kopecks"],
+        "bucket": row["bucket"],
+        "multiplier": float(row["multiplier"]),
+        "payout_kopecks": row["payout_kopecks"],
+        "created_at": row["created_at"].isoformat(),
+    } for row in rows]}
 
 
 @app.get("/v1/casino/roulette-history")
