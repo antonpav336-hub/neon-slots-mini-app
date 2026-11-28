@@ -170,11 +170,14 @@ def initialize_database() -> None:
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             bets JSONB NOT NULL,
+            request_key VARCHAR(64) NOT NULL,
             winning_number SMALLINT NOT NULL CHECK (winning_number BETWEEN 0 AND 36),
             total_bet_kopecks BIGINT NOT NULL CHECK (total_bet_kopecks > 0),
             payout_kopecks BIGINT NOT NULL DEFAULT 0 CHECK (payout_kopecks >= 0),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        CREATE UNIQUE INDEX IF NOT EXISTS casino_roulette_request_key_idx
+            ON casino_roulette_rounds(user_id, request_key);
         CREATE INDEX IF NOT EXISTS casino_roulette_user_history_idx
             ON casino_roulette_rounds(user_id, created_at DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS casino_crash_one_active_per_user_idx
@@ -1336,6 +1339,7 @@ class RouletteBetRequest(BaseModel):
 
 class RouletteSpinRequest(BaseModel):
     bets: list[RouletteBetRequest] = Field(min_length=1, max_length=36)
+    request_key: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")
 
 
 ROULETTE_RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
@@ -1373,14 +1377,6 @@ def spin_roulette(body: RouletteSpinRequest, user: User):
     total_bet = sum(bet.amount_kopecks for bet in body.bets)
     if total_bet > 100_000_000:
         raise HTTPException(status_code=422, detail="Общая сумма ставок не может превышать 1 000 000 ₽")
-    winning_number = secrets.randbelow(37)
-    payout = 0
-    for bet in body.bets:
-        won, odds = roulette_bet_wins(bet, winning_number)
-        if won:
-            payout += bet.amount_kopecks * odds
-    if payout > 2_000_000_000:
-        raise HTTPException(status_code=422, detail="Слишком большая потенциальная выплата")
     stored_bets = [bet.model_dump() for bet in body.bets]
     with pool.connection() as conn:
         with conn.transaction():
@@ -1392,6 +1388,22 @@ def spin_roulette(body: RouletteSpinRequest, user: User):
                 "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
                 (user["id"],),
             ).fetchone()
+            # A retried HTTP request returns the original spin and never charges twice.
+            previous = conn.execute(
+                """SELECT id, winning_number, total_bet_kopecks, payout_kopecks, created_at
+                   FROM casino_roulette_rounds WHERE user_id = %s AND request_key = %s""",
+                (user["id"], body.request_key),
+            ).fetchone()
+            if previous:
+                n = previous["winning_number"]
+                color = "green" if n == 0 else ("red" if n in ROULETTE_RED_NUMBERS else "black")
+                return {
+                    "round_id": str(previous["id"]), "winning_number": n, "color": color,
+                    "total_bet_kopecks": previous["total_bet_kopecks"],
+                    "payout_kopecks": previous["payout_kopecks"],
+                    "net_kopecks": previous["payout_kopecks"] - previous["total_bet_kopecks"],
+                    "created_at": previous["created_at"].isoformat()
+                }
             for table, game in [
                 ("casino_crash_rounds", "CRASH"), ("casino_mines_rounds", "MINES"),
                 ("casino_ladder_rounds", "ЛЕСЕНКА"), ("casino_blackjack_rounds", "BLACKJACK")
@@ -1404,15 +1416,23 @@ def spin_roulette(body: RouletteSpinRequest, user: User):
                     raise HTTPException(status_code=409, detail=f"Сначала заверши активную игру: {game}")
             if wallet["balance_kopecks"] < total_bet:
                 raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+            winning_number = secrets.randbelow(37)
+            payout = 0
+            for bet in body.bets:
+                won, odds = roulette_bet_wins(bet, winning_number)
+                if won:
+                    payout += bet.amount_kopecks * odds
+            if payout > 2_000_000_000:
+                raise HTTPException(status_code=422, detail="Слишком большая потенциальная выплата")
             conn.execute(
                 "UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s + %s, updated_at = NOW() WHERE user_id = %s",
                 (total_bet, payout, user["id"]),
             )
             row = conn.execute(
-                """INSERT INTO casino_roulette_rounds(user_id, bets, winning_number, total_bet_kopecks, payout_kopecks)
-                   VALUES (%s, %s::jsonb, %s, %s, %s)
+                """INSERT INTO casino_roulette_rounds(user_id, bets, request_key, winning_number, total_bet_kopecks, payout_kopecks)
+                   VALUES (%s, %s::jsonb, %s, %s, %s, %s)
                    RETURNING id, created_at""",
-                (user["id"], json.dumps(stored_bets), winning_number, total_bet, payout),
+                (user["id"], json.dumps(stored_bets), body.request_key, winning_number, total_bet, payout),
             ).fetchone()
     color = "green" if winning_number == 0 else ("red" if winning_number in ROULETTE_RED_NUMBERS else "black")
     return {
