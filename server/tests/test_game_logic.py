@@ -88,9 +88,9 @@ class CasinoGameLogicTests(unittest.TestCase):
             )
             self.assertEqual(request.bet_kopecks, limit)
 
-    def test_new_instant_games_reject_invalid_choice(self):
+    def test_new_instant_games_reject_unknown_game(self):
         with self.assertRaises(ValidationError):
-            InstantGameRequest(game="dice", choice="jackpot", bet_kopecks=100,
+            InstantGameRequest(game="slots", choice="over", bet_kopecks=100,
                                request_key="instant_test_key_0002")
 
     def test_baccarat_card_values_and_modulo_ten(self):
