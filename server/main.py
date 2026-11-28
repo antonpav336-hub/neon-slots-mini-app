@@ -386,6 +386,11 @@ def wallet(user: User):
         "updated_at": row["updated_at"].isoformat(),
     }
 
+class CasinoWithdrawRequest(BaseModel):
+    amount_kopecks: int = Field(gt=0, le=100_000_000)
+    request_key: str = Field(min_length=16, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
 class CasinoDepositCreateRequest(BaseModel):
     amount_kopecks: int = Field(gt=0, le=100_000_000)
 
@@ -1721,6 +1726,91 @@ def transactions(user: User, limit: int = 50):
         "sender_account_id": row["sender_account_id"],
         "recipient_account_id": row["recipient_account_id"],
     } for row in rows]}
+
+
+
+@app.post("/v1/casino/withdraw", status_code=201)
+def withdraw_casino_balance(
+    body: CasinoWithdrawRequest,
+    user: User,
+):
+    # This is an internal transfer of virtual credits between the same user's
+    # casino and NEON WALLET balances. No external payment rails are involved.
+    idempotency_key = f"casino-withdraw:{user['id']}:{body.request_key}"
+    with pool.connection() as conn:
+        with conn.transaction():
+            existing = conn.execute(
+                """SELECT id, amount_kopecks, created_at FROM transactions
+                   WHERE idempotency_key = %s""",
+                (idempotency_key,),
+            ).fetchone()
+            if existing:
+                casino = conn.execute(
+                    "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s",
+                    (user["id"],),
+                ).fetchone()
+                wallet = conn.execute(
+                    "SELECT balance_kopecks FROM wallets WHERE user_id = %s",
+                    (user["id"],),
+                ).fetchone()
+                return {
+                    "transaction_id": str(existing["id"]),
+                    "status": "completed",
+                    "amount_kopecks": existing["amount_kopecks"],
+                    "casino_balance_kopecks": casino["balance_kopecks"],
+                    "wallet_balance_kopecks": wallet["balance_kopecks"],
+                    "created_at": existing["created_at"].isoformat(),
+                    "replayed": True,
+                }
+
+            conn.execute(
+                "INSERT INTO casino_wallets(user_id, balance_kopecks) VALUES (%s, 0) ON CONFLICT (user_id) DO NOTHING",
+                (user["id"],),
+            )
+            # Lock both accounts in a stable order and settle in one transaction.
+            casino = conn.execute(
+                "SELECT balance_kopecks FROM casino_wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            wallet = conn.execute(
+                "SELECT balance_kopecks FROM wallets WHERE user_id = %s FOR UPDATE",
+                (user["id"],),
+            ).fetchone()
+            if not wallet:
+                raise HTTPException(status_code=404, detail="Счёт NEON WALLET не найден")
+            if casino["balance_kopecks"] < body.amount_kopecks:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+
+            debit = conn.execute(
+                """UPDATE casino_wallets SET balance_kopecks = balance_kopecks - %s,
+                   updated_at = NOW() WHERE user_id = %s AND balance_kopecks >= %s
+                   RETURNING balance_kopecks""",
+                (body.amount_kopecks, user["id"], body.amount_kopecks),
+            ).fetchone()
+            if not debit:
+                raise HTTPException(status_code=409, detail="Недостаточно средств на балансе казино")
+            credit = conn.execute(
+                """UPDATE wallets SET balance_kopecks = balance_kopecks + %s,
+                   updated_at = NOW() WHERE user_id = %s RETURNING balance_kopecks""",
+                (body.amount_kopecks, user["id"]),
+            ).fetchone()
+            tx = conn.execute(
+                """INSERT INTO transactions(id, idempotency_key, sender_user_id,
+                   amount_kopecks, kind, description)
+                   VALUES (gen_random_uuid(), %s, %s, %s, 'casino_withdrawal', 'Вывод из NEON CASINO')
+                   RETURNING id, created_at""",
+                (idempotency_key, user["id"], body.amount_kopecks),
+            ).fetchone()
+
+    return {
+        "transaction_id": str(tx["id"]),
+        "status": "completed",
+        "amount_kopecks": body.amount_kopecks,
+        "casino_balance_kopecks": debit["balance_kopecks"],
+        "wallet_balance_kopecks": credit["balance_kopecks"],
+        "created_at": tx["created_at"].isoformat(),
+        "replayed": False,
+    }
 
 
 @app.post("/v1/transfers")
