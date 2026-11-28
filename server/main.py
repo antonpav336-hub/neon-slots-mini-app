@@ -1,5 +1,7 @@
 import os
 import secrets
+import base64
+import binascii
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -7,6 +9,9 @@ import jwt
 import psycopg
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
@@ -83,6 +88,14 @@ def initialize_database() -> None:
             expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 minutes'),
             processed_at TIMESTAMPTZ,
             transaction_id UUID
+        );
+        CREATE TABLE IF NOT EXISTS wallet_devices (
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            device_id VARCHAR(64) NOT NULL,
+            public_key_der BYTEA NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, device_id)
         );
         CREATE INDEX IF NOT EXISTS casino_deposit_user_status_idx
             ON casino_deposit_requests(user_id, status, created_at DESC);
@@ -300,11 +313,12 @@ def create_casino_deposit_request(body: CasinoDepositCreateRequest, user: User):
             ).fetchone()
             if existing:
                 raise HTTPException(status_code=409, detail="У тебя уже есть ожидающий запрос. Подтверди или отклони его в NEON WALLET.")
+            approval_nonce = secrets.token_urlsafe(32)
             row = conn.execute(
-                """INSERT INTO casino_deposit_requests(user_id, amount_kopecks)
-                   VALUES (%s, %s)
+                """INSERT INTO casino_deposit_requests(user_id, amount_kopecks, approval_nonce)
+                   VALUES (%s, %s, %s)
                    RETURNING id, amount_kopecks, status, created_at, expires_at""",
-                (user["id"], body.amount_kopecks),
+                (user["id"], body.amount_kopecks, approval_nonce),
             ).fetchone()
     return {
         "request_id": str(row["id"]),
@@ -325,7 +339,7 @@ def pending_casino_deposits(user: User):
             (user["id"],),
         )
         rows = conn.execute(
-            """SELECT id, amount_kopecks, status, created_at, expires_at
+            """SELECT id, amount_kopecks, status, created_at, expires_at, approval_nonce
                FROM casino_deposit_requests
                WHERE user_id = %s AND status = 'pending' AND expires_at > NOW()
                ORDER BY created_at ASC""",
@@ -337,6 +351,7 @@ def pending_casino_deposits(user: User):
         "status": row["status"],
         "created_at": row["created_at"].isoformat(),
         "expires_at": row["expires_at"].isoformat(),
+        "approval_challenge": row["approval_nonce"],
         "sender": "NEON CASINO",
     } for row in rows]}
 
@@ -361,12 +376,43 @@ def get_casino_deposit_request(request_id: str, user: User):
     }
 
 
+class WalletDeviceRegisterRequest(BaseModel):
+    device_id: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")
+    public_key: str = Field(min_length=80, max_length=2000)
+
+
+class CasinoDepositApprovalRequest(BaseModel):
+    device_id: str = Field(min_length=16, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")
+    signature: str = Field(min_length=40, max_length=2000)
+
+
+@app.post("/v1/wallet/devices/register")
+def register_wallet_device(body: WalletDeviceRegisterRequest, user: User):
+    try:
+        public_key_der = base64.b64decode(body.public_key, validate=True)
+        public_key = serialization.load_der_public_key(public_key_der)
+        if not isinstance(public_key, ec.EllipticCurvePublicKey) or public_key.curve.name != "secp256r1":
+            raise ValueError("Unsupported key type")
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=400, detail="Некорректный ключ устройства")
+    with pool.connection() as conn:
+        with conn.transaction():
+            conn.execute(
+                """INSERT INTO wallet_devices(user_id, device_id, public_key_der)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (user_id, device_id) DO UPDATE SET
+                     public_key_der = EXCLUDED.public_key_der, last_seen_at = NOW()""",
+                (user["id"], body.device_id, public_key_der),
+            )
+    return {"device_id": body.device_id, "registered": True}
+
+
 @app.post("/v1/casino/deposit-requests/{request_id}/approve")
-def approve_casino_deposit(request_id: str, user: User):
+def approve_casino_deposit(request_id: str, body: CasinoDepositApprovalRequest, user: User):
     with pool.connection() as conn:
         with conn.transaction():
             request_row = conn.execute(
-                """SELECT id, amount_kopecks, status, expires_at
+                """SELECT id, amount_kopecks, status, expires_at, approval_nonce
                    FROM casino_deposit_requests
                    WHERE id = %s::uuid AND user_id = %s FOR UPDATE""",
                 (request_id, user["id"]),
@@ -375,6 +421,23 @@ def approve_casino_deposit(request_id: str, user: User):
                 raise HTTPException(status_code=404, detail="Запрос на пополнение не найден")
             if request_row["status"] != "pending":
                 raise HTTPException(status_code=409, detail="Этот запрос уже обработан")
+            device = conn.execute(
+                """SELECT public_key_der FROM wallet_devices
+                   WHERE user_id = %s AND device_id = %s""",
+                (user["id"], body.device_id),
+            ).fetchone()
+            if not device:
+                raise HTTPException(status_code=403, detail="Это устройство не зарегистрировано в NEON WALLET")
+            signed_message = (
+                f"NEON-CASINO-DEPOSIT\\n{request_row['id']}\\n"
+                f"{request_row['amount_kopecks']}\\n{request_row['approval_nonce']}"
+            )
+            try:
+                public_key = serialization.load_der_public_key(bytes(device["public_key_der"]))
+                signature = base64.b64decode(body.signature, validate=True)
+                public_key.verify(signature, signed_message.encode("utf-8"), ec.ECDSA(hashes.SHA256()))
+            except (ValueError, binascii.Error, InvalidSignature):
+                raise HTTPException(status_code=403, detail="Не удалось проверить подтверждение устройства")
             if request_row["expires_at"] <= datetime.now(timezone.utc):
                 conn.execute(
                     "UPDATE casino_deposit_requests SET status = 'expired', processed_at = NOW() WHERE id = %s::uuid",
